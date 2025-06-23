@@ -277,7 +277,7 @@ void VerilatorSimCtrl::Run() {
   // We always need to enable this as tracing can be enabled at runtime
   if (tracing_possible_) {
     Verilated::traceEverOn(true);
-    top_->trace(tracer_, 99, 0);
+    // top_->trace(tracer_, 99, 0); // comment this to avoid segmentation fault
   }
 
   Trace();

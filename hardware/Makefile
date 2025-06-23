@@ -75,6 +75,8 @@ endif
 ifeq ($(vcd_dump), 1)
   vcd_path    ?= ../vcd/$(app).vcd
   bender_defs += --define VCD_DUMP=1 --define VCD_PATH=$(vcd_path)
+  $(info, "[TB - VCD] VCD dump enabled for app: $(app)")
+  $(info, "[TB - VCD] VCD path: $(vcd_path)")
 endif
 
 # Check if the specified QuestaSim version exists
@@ -223,20 +225,26 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
   $(ROOT_DIR)/tb/verilator/lowrisc_dv_verilator_simutil_verilator/cpp/*.cc      \
   $(ROOT_DIR)/tb/verilator/ara_tb.cpp                                           \
   --cc                                                                          \
-  $(if $(trace),--trace-fst -Wno-INSECURE,)                                     \
+  $(if $(vcd_dump),--trace-fst --trace-structs -Wno-INSECURE,)		    		\
   --top-module $(veril_top) &&                                                  \
 	cd $(veril_library) && OBJCACHE='' make -j4 -f V$(veril_top).mk
+
+#   $(if $(vcd_dump),--trace-fst --trace-params --trace-structs -Wno-INSECURE,)		    
 
 # Simulation
 .PHONY: simv
 simv:
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$(app_path)/$(app),elf
+	$(veril_library)/V$(veril_top) $(if $(vcd_dump),-t,) -l ram,$(app_path)/$(app),elf
 
 .PHONY: riscv_tests_simv
 riscv_tests_simv: $(tests)
 
 $(tests): rv%: $(app_path)/rv%
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$<,elf &> $(buildpath)/$@.trace
+	$(veril_library)/V$(veril_top) $(if $(vcd_dump),-t,) -l ram,$<,elf &> $(buildpath)/$@.trace
+
+.PHONY: simv_trace
+simv_trace:
+	$(veril_library)/V$(veril_top) -t -l ram,$(app_path)/$(app),elf
 
 # Lint
 .PHONY: lint spyglass/tmp/files
