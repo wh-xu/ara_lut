@@ -23,10 +23,8 @@ INSTALL_DIR             ?= ${ROOT_DIR}/${INSTALL_PREFIX}
 GCC_INSTALL_DIR         ?= ${INSTALL_DIR}/riscv-gcc
 LLVM_INSTALL_DIR        ?= ${INSTALL_DIR}/riscv-llvm
 ISA_SIM_INSTALL_DIR     ?= ${INSTALL_DIR}/riscv-isa-sim
-ISA_SIM_MOD_INSTALL_DIR ?= ${INSTALL_DIR}/riscv-isa-sim-mod
 VERIL_INSTALL_DIR       ?= ${INSTALL_DIR}/verilator
 VERIL_VERSION           ?= v5.012
-DTC_COMMIT              ?= b6910bec11614980a21e46fbccc35934b671bd81
 
 CMAKE ?= cmake
 
@@ -54,7 +52,6 @@ endif
 # and require a manual call.
 git-submodules:
 	git submodule update --init --recursive
-	git submodule update --init --recursive --checkout -- $(ROOT_DIR)/toolchain/riscv-gnu-toolchain
 	git submodule update --init --recursive --checkout -- $(ROOT_DIR)/toolchain/newlib
 	git submodule update --init --recursive --checkout -- $(ROOT_DIR)/toolchain/riscv-llvm
 
@@ -63,18 +60,10 @@ git-submodules:
 all: toolchains riscv-isa-sim verilator
 
 # GCC and LLVM Toolchains
-.PHONY: toolchains toolchain-gcc toolchain-llvm toolchain-llvm-main toolchain-llvm-newlib toolchain-llvm-rt
-toolchains: toolchain-gcc toolchain-llvm
+.PHONY: toolchains toolchain-llvm toolchain-llvm-main toolchain-llvm-newlib toolchain-llvm-rt
+toolchains: toolchain-llvm
 
 toolchain-llvm: toolchain-llvm-main toolchain-llvm-newlib toolchain-llvm-rt
-
-toolchain-gcc: git-submodules Makefile
-	mkdir -p $(GCC_INSTALL_DIR)
-	# Apply patch on riscv-binutils
-	cd $(CURDIR)/toolchain/riscv-gnu-toolchain/riscv-binutils
-	cd $(CURDIR)/toolchain/riscv-gnu-toolchain && rm -rf build && mkdir -p build && cd build && \
-	CC=$(CC) CXX=$(CXX) ../configure --prefix=$(GCC_INSTALL_DIR) --with-arch=rv64gcv --with-cmodel=medlow --enable-multilib && \
-	$(MAKE) MAKEINFO=true -j4
 
 toolchain-llvm-main: git-submodules Makefile
 	mkdir -p $(LLVM_INSTALL_DIR)
@@ -117,6 +106,7 @@ toolchain-llvm-rt: git-submodules Makefile toolchain-llvm-main toolchain-llvm-ne
 	-DCOMPILER_RT_BUILD_PROFILE=OFF \
 	-DCOMPILER_RT_BUILD_SANITIZERS=OFF \
 	-DCOMPILER_RT_BUILD_XRAY=OFF \
+	-DCOMPILER_RT_BUILD_CTX_PROFILE=OFF \
 	-DCMAKE_C_COMPILER_WORKS=1 \
 	-DCMAKE_CXX_COMPILER_WORKS=1 \
 	-DCMAKE_SIZEOF_VOID_P=4 \
@@ -133,24 +123,7 @@ toolchain-llvm-rt: git-submodules Makefile toolchain-llvm-main toolchain-llvm-ne
 
 # Spike
 .PHONY: riscv-isa-sim riscv-isa-sim-mod
-riscv-isa-sim: ${ISA_SIM_INSTALL_DIR} ${ISA_SIM_MOD_INSTALL_DIR}
-riscv-isa-sim-mod: ${ISA_SIM_MOD_INSTALL_DIR}
-
-${ISA_SIM_MOD_INSTALL_DIR}: Makefile patches/0003-riscv-isa-sim-patch ${ISA_SIM_INSTALL_DIR}
-	# There are linking issues with the standard libraries when using newer CC/CXX versions to compile Spike.
-	# Therefore, here we resort to older versions of the compilers.
-	# If there are problems with dynamic linking, use:
-	# make riscv-isa-sim LDFLAGS="-static-libstdc++"
-	# Spike was compiled successfully using gcc and g++ version 7.2.0.
-	cd toolchain/riscv-isa-sim && git stash && git apply ../../patches/0003-riscv-isa-sim-patch && \
-	rm -rf build && mkdir -p build && cd build; \
-	[ -d dtc ] || git clone https://git.kernel.org/pub/scm/utils/dtc/dtc.git && cd dtc && git checkout $(DTC_COMMIT); \
-	make install SETUP_PREFIX=$(ISA_SIM_MOD_INSTALL_DIR) PREFIX=$(ISA_SIM_MOD_INSTALL_DIR) && \
-	PATH=$(ISA_SIM_MOD_INSTALL_DIR)/bin:$$PATH; cd ..; \
-	../configure --prefix=$(ISA_SIM_MOD_INSTALL_DIR) \
-	--without-boost --without-boost-asio --without-boost-regex && \
-	make -j32 && make install; \
-	git stash
+riscv-isa-sim: ${ISA_SIM_INSTALL_DIR} 
 
 ${ISA_SIM_INSTALL_DIR}: Makefile
 	# There are linking issues with the standard libraries when using newer CC/CXX versions to compile Spike.
@@ -159,7 +132,6 @@ ${ISA_SIM_INSTALL_DIR}: Makefile
 	# make riscv-isa-sim LDFLAGS="-static-libstdc++"
 	# Spike was compiled successfully using gcc and g++ version 7.2.0.
 	cd toolchain/riscv-isa-sim && rm -rf build && mkdir -p build && cd build; \
-	[ -d dtc ] || git clone https://git.kernel.org/pub/scm/utils/dtc/dtc.git && cd dtc && git checkout $(DTC_COMMIT); \
 	make install SETUP_PREFIX=$(ISA_SIM_INSTALL_DIR) PREFIX=$(ISA_SIM_INSTALL_DIR) && \
 	PATH=$(ISA_SIM_INSTALL_DIR)/bin:$$PATH; cd ..; \
 	../configure --prefix=$(ISA_SIM_INSTALL_DIR) \
@@ -177,6 +149,8 @@ ${VERIL_INSTALL_DIR}: Makefile
 	cd $(CURDIR)/toolchain/verilator && git clean -xfdf && autoconf && \
 	CC=$(CLANG_CC) CXX=$(CLANG_CXX) CXXFLAGS=$(CLANG_CXXFLAGS) LDFLAGS=$(CLANG_LDFLAGS) \
 		./configure --prefix=$(VERIL_INSTALL_DIR) && make -j8 && make install
+	# A patch to fix path error during simulation compilation
+	ln -s $(VERIL_INSTALL_DIR)/bin/verilator_bin $(VERIL_INSTALL_DIR)/share/verilator/bin
 
 # RISC-V Tests
 riscv_tests:
