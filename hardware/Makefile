@@ -229,8 +229,6 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
   --top-module $(veril_top) &&                                                  \
 	cd $(veril_library) && OBJCACHE='' make -j4 -f V$(veril_top).mk
 
-#   $(if $(vcd_dump),--trace-fst --trace-params --trace-structs -Wno-INSECURE,)		    
-
 # Simulation
 .PHONY: simv
 simv:

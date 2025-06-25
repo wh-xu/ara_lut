@@ -45,6 +45,10 @@ module ara_tb_verilator #(
     if (exit_o[0]) begin
       if (exit_o >> 1) begin
         $warning("Core Test ", $sformatf("*** FAILED *** (tohost = %0d)", (exit_o >> 1)));
+
+        $display("[TB - VCD] Dump off and finish");
+        $dumpoff;
+        $dumpflush;
       end else begin
         // Print vector HW runtime
         $display("[hw-cycles]: %d", int'(dut.runtime_buf_q));

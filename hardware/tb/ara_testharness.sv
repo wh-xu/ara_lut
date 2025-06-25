@@ -284,8 +284,6 @@ module ara_testharness #(
 
 `endif
 
-
-
 // Dump VCD with a SW trigger
 `ifdef VCD_DUMP
 
@@ -301,7 +299,6 @@ module ara_testharness #(
 
   localparam logic [63:0] VCD_TRIGGER_ON  = 64'h0000_0000_0000_0001;
   localparam logic [63:0] VCD_TRIGGER_OFF = 64'hFFFF_FFFF_FFFF_FFFF;
-  localparam logic [1:0] cnt_exit_o  = '0;
 
   event start_dump_event;
   event stop_dump_event;
@@ -327,10 +324,12 @@ module ara_testharness #(
     end
   end
 
+  logic [1:0] cnt_exit_o  = '0;
+  
   initial begin
     // @(start_dump_event);
     $dumpfile(vcd_path);
-    $dumpvars(64, i_ara_soc.i_system.i_ara);
+    $dumpvars(0, i_ara_soc.i_system.i_ara.i_masku);
     $display("[TB - VCD] START DUMPING to %s\n", vcd_path);
     $dumpon;
 
@@ -344,10 +343,11 @@ module ara_testharness #(
 
   always @(exit_o) begin
     if (exit_o == 0) begin
-      cnt_exit_o <= cnt_exit_o + 1;
-      $display("[TB] exit_o changed to: %0d", exit_o);
+      cnt_exit_o = cnt_exit_o + 1;
+      // $display("[TB] exit_o changed to: %0d", exit_o);
+      // $display("[TB] cnt_exit_o changed to: %0d", cnt_exit_o);
 
-      if (cnt_exit_o == 1) begin
+      if (cnt_exit_o == 2) begin
         $display("[TB - VCD] Dump off and finish");
         $dumpoff;
         $dumpflush;
