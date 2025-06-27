@@ -79,11 +79,8 @@ ifeq ($(vcd_dump), 1)
   $(info, "[TB - VCD] VCD path: $(vcd_path)")
 endif
 
-# Check if the specified QuestaSim version exists
-ifeq (, $(shell which $(questa_cmd)))
-  # Spaces are needed for indentation here!
-  $(warning "Specified QuestaSim version ($(questa_cmd)) not found in PATH $(PATH)")
-  questa_cmd =
+ifeq ($(debug), 1)
+  bender_defs += --define DEBUG=1
 endif
 
 questa_args += +UVM_NO_RELNOTES
@@ -232,7 +229,7 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
 # Simulation
 .PHONY: simv
 simv:
-	$(veril_library)/V$(veril_top) $(if $(vcd_dump),-t,) -l ram,$(app_path)/$(app),elf
+	$(veril_library)/V$(veril_top) -l ram,$(app_path)/$(app),elf
 
 .PHONY: riscv_tests_simv
 riscv_tests_simv: $(tests)

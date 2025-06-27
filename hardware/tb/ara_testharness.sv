@@ -351,7 +351,7 @@ module ara_testharness #(
         $display("[TB - VCD] Dump off and finish");
         $dumpoff;
         $dumpflush;
-        $finish;
+        // $finish;
       end
     end
   end

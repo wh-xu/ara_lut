@@ -611,6 +611,19 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     .pop_i     (vrgat_req_fifo_pop  )
   );
 
+  `ifdef DEBUG
+  // Display vrgat_req_d for debugging
+  always @(posedge clk_i) begin
+    if (vrgat_idx_fifo_push) begin
+      $display("[MASKU] i_fifo_vrgat_idx: last %h, vrgat_idx_oor_d: %h, vrgat_req_idx_d: %h", vcompress_last_idx_d, vrgat_idx_oor_d, vrgat_req_idx_d);
+    end
+
+    if (vrgat_req_fifo_push) begin
+      $display("[MASKU] i_fifo_vrgat_req: idx=%h, eew=%h, vs=%h, is_last_req=%h", vrgat_req_d.idx, vrgat_req_d.eew, vrgat_req_d.vs, vrgat_req_d.is_last_req);
+    end
+  end
+  `endif
+
   ////////////////////////////
   //// Scalar result reg  ////
   ////////////////////////////

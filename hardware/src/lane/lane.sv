@@ -411,6 +411,27 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .operand_valid_o(vrf_operand_valid)
   );
 
+  `ifdef DEBUG
+  // Display vrgat_req_d for debugging
+  always @(posedge clk_i) begin
+    for(int i=0; i<NrVRFBanksPerLane; i++) begin
+      if(vrf_req[i] && vrf_wen[i]) begin
+        $display("Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
+      end
+    end
+
+    for(int i=0; i<NrOperandQueues; i++) begin
+      if(vrf_operand_valid[i]) begin
+        $display("Lane-%d [VRF] operand_queue[%d]: operand=%h", lane_id_i, i, vrf_operand[i]);
+      end
+    end
+
+    if(stu_operand_valid_o) begin
+      $display("Lane-%d [STU] operand=%h", lane_id_i, stu_operand_o);
+    end
+  end
+  `endif
+
   //////////////////////
   //  Operand queues  //
   //////////////////////
