@@ -108,12 +108,15 @@ void load_codeword_batch(_DTYPE *codeword, uint16_t bsz, uint16_t n_subvec){
 }
 
 // PQ Lookup Table (LUT) for Searching
-void pq_lut(uint16_t batch_size, uint16_t n_subvec, _DTYPE *dist){
+void pq_lut_single(uint16_t k_cluster, uint16_t n_subvec, uint16_t bsz_subvec, _DTYPE *dist){
+  // TODO: We need additional loops to handle partial subvectors
+  // Move data off chip and accumulate later
+
   // Lookup table
   asm volatile("vrgatherei16.vv v16, v0, v8;");
 
   // SIMD Accumulation
-  uint16_t n_elements = batch_size*n_subvec;
+  uint16_t n_elements = k_cluster*n_subvec;
   while(n_subvec > 1){
     n_elements >>= 1;
     asm volatile("vslidedown.vx v24, v16, %0;" ::"r"(n_elements));

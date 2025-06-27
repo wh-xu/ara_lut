@@ -47,6 +47,6 @@ void load_pq_adt(int16_t *lut, uint16_t k_cluster, uint16_t n_subvec);
 void load_codeword_batch(int16_t *codeword, uint16_t bsz, uint16_t n_subvec);
 
 // PQ Lookup Table (LUT) for Searching
-void pq_lut(uint16_t batch_size, uint16_t n_subvec, int16_t *dist);
+void pq_lut_single(uint16_t k_cluster, uint16_t n_subvec, uint16_t bsz_subvec, int16_t *dist);
 
 #endif

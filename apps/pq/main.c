@@ -45,64 +45,6 @@
 #include "kernel/utils.h"
 #include "kernel/pq.h"
 
-#define N 4096
-
-// int main(){
-//     int n_runs = 1;
-//     int vl = 256;
-
-//     // Init test data
-//     uint16_t buf_idx[N];
-//     int16_t buf_val[N];
-//     int16_t buf_res[N];
-//     for(int i=0; i<N; i++){
-//         buf_idx[i] = i; 
-//         buf_val[i] = vl - i;
-//     }
-
-
-//     // Set vector length
-    
-//     // // vuint16m1_t idx;
-//     // // vint16m1_t val, res;
-//     size_t avl = __riscv_vsetvl_e16m1(vl);
-
-//     #ifdef SPIKE
-//     printf("avl: %d\n", avl);
-//     #endif
-
-//     // __riscv_vrgather_vv_f32m1(0, 0, 0);
-    
-//     start_timer();
-//     // load/store
-//     asm volatile("vle16.v v5, (%0);" ::"r"(buf_idx));
-//     asm volatile("vle16.v v8, (%0);" ::"r"(buf_val));
-    
-//     // // __riscv_vle16_v_i16m1(val, buf_val, avl);
-//     // // __riscv_vle16_v_u16m1(val, buf_val, avl);
-
-//     for(int i=0; i<n_runs; i++){
-//         // asm volatile("vrgather.vv v10, v8, v5;"); // reverse order
-//         asm volatile("vrgatherei16.vv v10, v8, v5;"); // reverse order
-//     }
-
-//     asm volatile("vse16.v v10, (%0);" ::"r"(buf_res));
-    
-//     #ifdef SPIKE
-//     for(int i=0; i<avl; i++){
-//         printf("\n%d @ %d", buf_res[i], i);
-//     }
-//     #endif
-
-//     // asm volatile("vsetvli zero, %0, e16, m1, ta, ma" ::"r"(len));
-//     stop_timer();
-
-//     uint64_t runtime = get_timer();
-//     printf("\n\nThe execution took %d cycles.\n", runtime);
-
-//     return 0;
-// }
-
 // Define PQ parameters:
 extern uint64_t k_cluster;
 extern uint64_t n_dim;
@@ -160,7 +102,6 @@ int main(){
     #endif
 
     start_timer();
-
     // Compute transposed PQ ADT 
     compute_pq_adt(query, codebook, pq_adt, k_cluster, n_dim, n_subvec);
     
