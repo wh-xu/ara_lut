@@ -61,7 +61,7 @@ extern int16_t gt_adt[] __attribute__((aligned(32 * NR_LANES), section(".l2")));
 extern int16_t gt_dist[] __attribute__((aligned(32 * NR_LANES), section(".l2")));
 
 int main(){
-    int n_runs = 100;
+    int n_runs = 40;
     int vl = 4096/16;
 
     // Init test data
@@ -101,7 +101,6 @@ int main(){
     print_array(gt_adt, k_cluster*n_subvec, n_subvec);
     #endif
 
-    start_timer();
     // Compute transposed PQ ADT 
     compute_pq_adt(query, codebook, pq_adt, k_cluster, n_dim, n_subvec);
     
@@ -113,10 +112,11 @@ int main(){
     #endif
 
     // Compute PQ LUT
+    start_timer();
     load_pq_adt(pq_adt, k_cluster, n_subvec);
-    load_codeword_batch(pq_cw, bsz, n_subvec);
     for(int i=0; i<n_runs; i++){
-        pq_lut(bsz, n_subvec, gt_dist);
+        load_codeword_batch(pq_cw, bsz, n_subvec);
+        pq_lut_single(bsz, n_subvec, 0, gt_dist);
     }
     stop_timer();
 

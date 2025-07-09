@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Generate data
-k_cluster=16
-n_subvec=16
+k_cluster=256
+n_subvec=1
 n_dim=64
 n_cw=16
 n_query=1

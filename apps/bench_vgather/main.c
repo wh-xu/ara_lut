@@ -46,15 +46,15 @@
 #define N 4096
 
 int main(){
-    int n_runs = 1;
-    int vl = 32;
+    int n_runs = 100;
+    const uint16_t vl = 256;
 
     // Init test data
-    uint16_t buf_idx[N];
-    int16_t buf_val[N], buf_res[N];
+    uint16_t buf_idx[vl];
+    int16_t buf_val[vl], buf_res[vl];
     
     static uint32_t seed = 12345;
-    for(uint16_t i=0; i<N; i++){
+    for(uint16_t i=0; i<vl; i++){
         // Simple linear congruential generator for random values
         seed = seed * 1103515245 + 12345;
         buf_idx[i] = ((seed >> 16) & 0xFFFF) % vl;
@@ -62,20 +62,22 @@ int main(){
         buf_val[i] = i+1;
     }
 
-    start_timer();
-
     // Set vector length
     // size_t avl = __riscv_vsetvl_e16m1(vl);
     asm volatile("vsetvli zero, %0, e16, m1, ta, ma" ::"r"(vl));
 
     // load/store
-    asm volatile("vle16.v v4, (%0);" ::"r"(buf_idx));
     asm volatile("vle16.v v8, (%0);" ::"r"(buf_val));
-    
+    asm volatile("vle16.v v4, (%0);" ::"r"(buf_idx));
+
+    start_timer();
+
     for(int i=0; i<n_runs; i++){
         asm volatile("vrgatherei16.vv v10, v8, v4;"); 
         // asm volatile("vrgather.vv v10, v8, v5;"); 
     }
+
+    stop_timer();
 
     #ifdef SPIKE
     printf("\n\n\t");
@@ -153,10 +155,10 @@ int main(){
     // }
     //////////////////////////////////////////////////////////////
 
-    stop_timer();
-
     uint64_t runtime = get_timer();
+    double throughput = (double)n_runs * vl / (double)runtime;
     printf("\n\nThe execution took %d cycles.\n", runtime);
-
+    printf("Throughput: %.2f elements/cycle\n", throughput);
+    
     return 0;
 }
