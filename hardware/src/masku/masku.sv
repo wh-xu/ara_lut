@@ -12,6 +12,7 @@
 
 module masku import ara_pkg::*; import rvv_pkg::*; #(
     parameter  int  unsigned NrLanes   = 0,
+    parameter  int  unsigned NrVRFBanksPerLane   = 0,
     parameter  int  unsigned VLEN      = 0,
     parameter  type          vaddr_t   = logic, // Type used to address vector register file elements
     parameter  type          pe_req_t  = logic,
@@ -89,6 +90,11 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
   // ALU/FPU result (deshuffled)
   logic  [NrLanes*DataWidth-1:0] masku_operand_alu_seq;
 
+  // Operands for parallel LUT
+  elen_t [NrLanes-1:0] masku_operand_lut;
+  logic  [NrLanes-1:0] masku_operand_lut_valid;
+  logic  [NrLanes-1:0] masku_operand_lut_ready;
+
   // vd (shuffled)
   elen_t [NrLanes-1:0] masku_operand_vd;
   logic  [NrLanes-1:0] masku_operand_vd_valid;
@@ -150,6 +156,10 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     .masku_operand_m_seq_ready_i   (                          '0 ),
     .bit_enable_mask_o             (             bit_enable_mask ),
     .alu_result_compressed_seq_o   (   alu_result_compressed_seq )
+    // Operands for parallel LUT
+    // .masku_operand_lut_o           (           masku_operand_lut ),
+    // .masku_operand_lut_valid_o     (     masku_operand_lut_valid ),
+    // .masku_operand_lut_ready_i     (     masku_operand_lut_ready )
   );
 
   // Local Parameter for mask logical instructions
@@ -185,6 +195,7 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
   // Ancillary signal to tweak the VRF byte-enable, accounting for an unbalanced write,
   // i.e., when the number of elements does not perfectly divide NrLanes
   logic [3:0] elm_per_lane; // From 0 to 8 elements per lane
+  logic [10:0] elm_all_lane; // From 0 to 8 elements per lane
   logic [NrLanes-1:0] additional_elm; // There can be an additional element for some lanes
   // BE signals for VIOTA
   logic [NrLanes*DataWidth/8-1:0] be_viota_seq_d, be_viota_seq_q, be_vrgat_seq_d, be_vrgat_seq_q;
@@ -611,18 +622,18 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     .pop_i     (vrgat_req_fifo_pop  )
   );
 
-  `ifdef DEBUG
-  // Display vrgat_req_d for debugging
-  always @(posedge clk_i) begin
-    if (vrgat_idx_fifo_push) begin
-      $display("[MASKU] i_fifo_vrgat_idx: last %h, vrgat_idx_oor_d: %h, vrgat_req_idx_d: %h", vcompress_last_idx_d, vrgat_idx_oor_d, vrgat_req_idx_d);
-    end
+  // `ifdef DEBUG
+  // // Display vrgat_req_d for debugging
+  // always @(posedge clk_i) begin
+  //   if (vrgat_idx_fifo_push) begin
+  //     $display("[MASKU] i_fifo_vrgat_idx: last %h, vrgat_idx_oor_d: %h, vrgat_req_idx_d: %h", vcompress_last_idx_d, vrgat_idx_oor_d, vrgat_req_idx_d);
+  //   end
 
-    if (vrgat_req_fifo_push) begin
-      $display("[MASKU] i_fifo_vrgat_req: idx=%h, eew=%h, vs=%h, is_last_req=%h", vrgat_req_d.idx, vrgat_req_d.eew, vrgat_req_d.vs, vrgat_req_d.is_last_req);
-    end
-  end
-  `endif
+  //   if (vrgat_req_fifo_push) begin
+  //     $display("[MASKU] i_fifo_vrgat_req: idx=%h, eew=%h, vs=%h, is_last_req=%h", vrgat_req_d.idx, vrgat_req_d.eew, vrgat_req_d.vs, vrgat_req_d.is_last_req);
+  //   end
+  // end
+  // `endif
 
   ////////////////////////////
   //// Scalar result reg  ////
@@ -1187,8 +1198,15 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
               end
             endcase
           end else begin
-            // VRGATHEREI16: treat the index as a 16-bit number
-            vrgat_req_idx_d = masku_operand_alu_seq[vrgat_cnt_q[idx_width(NrLanes*DataWidth/16)-1:0] * 16 +: 16];
+            // TODO: bypass if >CBSEQ
+            if(vinsn_issue.lut_mode == CBSEQ) begin
+              // VRGATHEREI16: treat the index as a 16-bit number
+              vrgat_req_idx_d = masku_operand_alu_seq[vrgat_cnt_q[idx_width(NrLanes*DataWidth/16)-1:0] * 16 +: 16];
+            end
+
+            // `ifdef DEBUG
+            // $display("[MASKU] vinsn_issue's lut: %h", vinsn_issue.lut_mode);
+            // `endif
           end
 
           // VRGATHER.v[x|i] splats one scalar into Vd. The scalar is not truncated
@@ -1215,16 +1233,26 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
     // Handle the counters
     if (vinsn_issue.op inside {[VRGATHER:VCOMPRESS]} && &masku_operand_alu_valid && (vrgat_idx_fifo_push || (~vrgat_idx_fifo_full && ~vrgat_req_fifo_full && (vinsn_issue.op == VCOMPRESS)))) begin
-      // Count up if we could process the current input chunk
-      vrgat_cnt_d = vrgat_cnt_q + 1;
-      in_ready_cnt_en = 1'b1;
+      // TODO: increase the counter when >CBSEQ
+      if(vinsn_issue.lut_mode > CBSEQ) begin
+        // Count up if we could process the current input chunk
+        vrgat_cnt_d = vrgat_cnt_q + (NrLanes*NrVRFBanksPerLane*DataWidth/16);
+        in_ready_cnt_en = 1'b1;
+        `ifdef DEBUG
+        $display("[MASKU] vrgat_cnt_d: %d", vrgat_cnt_d);
+        `endif
+      end else begin
+        // Count up if we could process the current input chunk
+        vrgat_cnt_d = vrgat_cnt_q + 1;
+        in_ready_cnt_en = 1'b1;
+      end
 
       // We either finished or we need to ask a new idx operand
       if ((in_ready_cnt_q[idx_width(NrLanes*DataWidth)-1:0] == in_ready_threshold_q) || (vrgat_cnt_q == (vinsn_issue.vl - 1))) begin
         in_ready_cnt_clr = 1'b1;
         masku_operand_alu_ready = '1;
         // Check if we are over
-        if (vrgat_cnt_q == (vinsn_issue.vl - 1)) begin
+        if (vrgat_cnt_q >= (vinsn_issue.vl - 1)) begin
           vrgat_cnt_d = '0;
           vcompress_last_idx_d = (vinsn_issue.op == VCOMPRESS);
           // End of the pre-issue phase
@@ -1383,7 +1411,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
       // Account for the written results
       // VIOTA and VID do not write bits!
-      processing_cnt_d = vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VRGATHEREI16]} ? processing_cnt_q - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew) : processing_cnt_q - NrLanes * DataWidth;
+      elm_all_lane = (NrLanes * DataWidth * (vinsn_issue.lut_mode>CBSEQ ? NrVRFBanksPerLane : 1) / 8) >> vinsn_issue.vtype.vsew;
+      processing_cnt_d = vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VRGATHEREI16]} ? processing_cnt_q - elm_all_lane : processing_cnt_q - NrLanes * DataWidth;
       // Account for the written results by VCOMPRESS
       if (vinsn_issue.op == VCOMPRESS) begin
         vcompress_cnt_d = vcompress_cnt_d - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew);
@@ -1453,7 +1482,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         // Decrement the counter of remaining vector elements waiting to be written
         if (!(vinsn_commit.op inside {VSE})) begin
           if (vinsn_commit.op inside {[VIOTA:VID],[VRGATHER:VCOMPRESS]}) begin
-            commit_cnt_d = commit_cnt_q - ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew));
+            // TODO: increase the counter when >CBSEQ
+            commit_cnt_d = commit_cnt_q - ((NrLanes * (vinsn_commit.lut_mode>CBSEQ ? NrVRFBanksPerLane : 1) * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew));
             if (commit_cnt_q < ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew)))
               commit_cnt_d = '0;
           end else begin

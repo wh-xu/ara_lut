@@ -82,7 +82,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
   `FF(csr_vxrm_q, csr_vxrm_d, '0)
   // Converts between the internal representation of `vtype_t` and the full XLEN-bit CSR.
   function automatic xlen_t xlen_vtype(vtype_t vtype);
-    xlen_vtype = {vtype.vill, {CVA6Cfg.XLEN-9{1'b0}}, vtype.vma, vtype.vta, vtype.vsew,
+    xlen_vtype = {vtype.vill, {CVA6Cfg.XLEN-12{1'b0}}, vtype.vlut, vtype.vma, vtype.vta, vtype.vsew,
       vtype.vlmul[2:0]};
   endfunction: xlen_vtype
 
@@ -90,6 +90,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
   function automatic vtype_t vtype_xlen(xlen_t xlen);
     vtype_xlen = '{
       vill  : xlen[CVA6Cfg.XLEN-1],
+      vlut  : vlut_e'(xlen[10:8]),
       vma   : xlen[7],
       vta   : xlen[6],
       vsew  : vew_e'(xlen[5:3]),
@@ -624,7 +625,12 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                 end else if (insn.vsetivli_type.func2 == 2'b11) begin // vsetivli
                   csr_vtype_d = vtype_xlen(xlen_t'(insn.vsetivli_type.zimm10));
                 end else if (insn.vsetvl_type.func7 == 7'b100_0000) begin // vsetvl
-                  csr_vtype_d = vtype_xlen(xlen_t'(acc_req_i.rs2[7:0]));
+                  csr_vtype_d = vtype_xlen(xlen_t'(acc_req_i.rs2[10:0]));
+
+                  // `ifdef DEBUG
+                  // $display("vsetvl rs2: %h", acc_req_i.rs2);
+                  // $display("csr_vtype_d: %h", csr_vtype_d);
+                  // `endif
                 end else
                   illegal_insn = 1'b1;
 
@@ -719,6 +725,8 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     // The MASKU will ask for elements from vs2 through the MaskB opqueue
                     // and deshuffle them with eew_vd_op encoding
                     ara_req.eew_vd_op = eew_q[ara_req.vs2];
+                    // TODO: add vlut flag
+                    ara_req.lut_mode = csr_vtype_q.vlut;
                   end
                   6'b010000: begin
                     ara_req.op = ara_pkg::VADC;

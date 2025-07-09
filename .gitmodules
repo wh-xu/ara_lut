@@ -15,7 +15,3 @@
 	url = https://github.com/llvm/llvm-project.git
 	ignore = dirty
 	update = none
-[submodule "apps/rvv-bench"]
-	path = apps/rvv-bench
-	url = https://github.com/camel-cdr/rvv-bench.git
-	update = none

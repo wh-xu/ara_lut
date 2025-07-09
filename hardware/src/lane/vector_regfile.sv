@@ -26,7 +26,10 @@ module vector_regfile import ara_pkg::*; #(
     input  strb_t    [NrBanks-1:0]         be_i,
     // Operands
     output elen_t    [NrOperandQueues-1:0] operand_o,
-    output logic     [NrOperandQueues-1:0] operand_valid_o
+    output logic     [NrOperandQueues-1:0] operand_valid_o,
+    // Operands for parallel LUT
+    output elen_t    [NrBanks-1:0]         operand_lut_o,
+    output logic     [NrBanks-1:0]         operand_lut_valid_o
   );
 
 `include "common_cells/registers.svh"
@@ -44,6 +47,11 @@ module vector_regfile import ara_pkg::*; #(
   elen_t    [NrBanks-1:0] rdata;
   logic     [NrBanks-1:0] rdata_valid_q;
   opqueue_e [NrBanks-1:0] tgt_opqueue_q;
+
+  elen_t    [NrBanks-1:0] rdata_lut;
+  logic     [NrBanks-1:0] rdata_valid_lut_q;
+  elen_t    [NrBanks-1:0] rdata_xbar;
+  logic     [NrBanks-1:0] rdata_valid_xbar_q;
 
   // Generate the rdata_valid and tgt_opqueue signals by delaying the request by one cycle
   always_ff @(posedge clk_i or negedge rst_ni) begin: p_rdata_valid
@@ -99,6 +107,9 @@ module vector_regfile import ara_pkg::*; #(
   //  Multiplexer  //
   ///////////////////
 
+  assign rdata_xbar = &rdata_valid_q? '0 : rdata;
+  assign rdata_valid_xbar_q = &rdata_valid_q? '0 : rdata_valid_q;
+
   stream_xbar #(
     .NumInp   (NrBanks        ),
     .NumOut   (NrOperandQueues),
@@ -109,8 +120,8 @@ module vector_regfile import ara_pkg::*; #(
     .rst_ni (rst_ni         ),
     .flush_i(1'b0           ),
     .rr_i   ('0             ),
-    .data_i (rdata          ),
-    .valid_i(rdata_valid_q  ),
+    .data_i (rdata_xbar     ),
+    .valid_i(rdata_valid_xbar_q  ),
     .ready_o(/* Unused */   ),
     .sel_i  (tgt_opqueue_q  ),
     .data_o (operand_o      ),
@@ -118,5 +129,8 @@ module vector_regfile import ara_pkg::*; #(
     .idx_o  (/* Unused */   ),
     .ready_i('1             ) // Always ready
   );
+
+  assign operand_lut_o = &rdata_valid_q? rdata: '0;
+  assign operand_lut_valid_o = &rdata_valid_q? rdata_valid_q : '0;
 
 endmodule : vector_regfile

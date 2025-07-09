@@ -323,6 +323,10 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
 
     // We received a new vector instruction
     if (pe_req_valid && pe_req_ready && !vinsn_running_d[pe_req.id]) begin
+      `ifdef DEBUG
+      $display("[LANE SEQUENCER-%d] pe_req: op=%h, vfu=%h, lut_mode=%h", lane_id_i, pe_req.op, pe_req.vfu, pe_req.lut_mode);
+      `endif
+
       // Populate the VFU request
       vfu_operation_d = '{
         id             : pe_req.id,
@@ -342,6 +346,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         wide_fp_imm    : pe_req.wide_fp_imm,
         cvt_resize     : pe_req.cvt_resize,
         vtype          : pe_req.vtype,
+        // TODO: add lut_mode?
         default        : '0
       };
       vfu_operation_d.vtype.vsew = pe_req.op inside {[VMFEQ:VMSGT]} ? pe_req.eew_vs2 : pe_req.vtype.vsew;
@@ -754,6 +759,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             target_fu : ALU_SLDU,
             conv      : OpQueueConversionNone,
             cvt_resize: CVT_SAME,
+            lut_mode  : pe_req.lut_mode,
             default : '0
           };
           // Since this request goes outside of the lane, we might need to request an
@@ -868,6 +874,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             target_fu : ALU_SLDU,
             conv      : OpQueueConversionNone,
             cvt_resize: CVT_SAME,
+            lut_mode  : pe_req.lut_mode,
             default : '0
           };
           // vl and eew depend on the real eew on which we are working on
@@ -946,6 +953,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         vl         : 1,
         vstart     : masku_vrgat_req_q.idx,
         hazard     : '0,
+        lut_mode   : pe_req.lut_mode,
         default    : '0
       };
       operand_request_push[MaskB] = masku_vrgat_req_ready_d;

@@ -39,9 +39,20 @@ package rvv_pkg;
     LMUL_1_2  = 3'b111
   } vlmul_e;
 
+  // LUT type
+  typedef enum logic [2:0] {
+    CBSEQ = 3'b000,
+    CB16  = 3'b001,
+    CB32  = 3'b010,
+    CB64  = 3'b011,
+    CB128 = 3'b100,
+    CB256 = 3'b101
+  } vlut_e;
+
   // Vector type register
   typedef struct packed {
     logic vill;
+    vlut_e vlut;
     logic vma;
     logic vta;
     vew_e vsew;

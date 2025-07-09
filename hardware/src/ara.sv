@@ -12,7 +12,8 @@ module ara import ara_pkg::*; #(
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
     parameter  int           unsigned OSSupport    = 1,
     // Support for floating-point data types
-    parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
+    parameter  fpu_support_e          FPUSupport   = FPUSupportHalf,
+    // parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
     // External support for vfrec7, vfrsqrt7
     parameter  fpext_support_e        FPExtSupport = FPExtSupportEnable,
     // Support for fixed-point data types
@@ -157,6 +158,9 @@ module ara import ara_pkg::*; #(
 
     // Request token, for registration in the sequencer
     logic token;
+
+    // Config bits for lookup table (LUT) mode
+    rvv_pkg::vlut_e lut_mode;
   } ara_req_t;
 
   typedef struct packed {
@@ -365,6 +369,9 @@ module ara import ara_pkg::*; #(
   logic      [NrLanes-1:0]                     masku_vrgat_req_valid;
   logic      [NrLanes-1:0]                     masku_vrgat_req_ready;
   vrgat_req_t                                  masku_vrgat_req;
+  // Parallel LUT
+  elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut;
+  logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid;
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin: gen_lanes
     lane #(
@@ -444,7 +451,10 @@ module ara import ara_pkg::*; #(
       .masku_vrgat_req_i               (masku_vrgat_req                     ),
       .mask_i                          (mask[lane]                          ),
       .mask_valid_i                    (mask_valid[lane] & mask_valid_lane  ),
-      .mask_ready_o                    (lane_mask_ready[lane]               )
+      .mask_ready_o                    (lane_mask_ready[lane]               ),
+      // Interface with the parallel permutation network in mask unit
+      .vrf_operand_lut_o               (vrf_operand_lut[lane]             ),
+      .vrf_operand_lut_valid_o         (vrf_operand_lut_valid[lane]       )
     );
   end: gen_lanes
 
@@ -618,6 +628,7 @@ module ara import ara_pkg::*; #(
 
   masku #(
     .NrLanes  (NrLanes  ),
+    .NrVRFBanksPerLane(NrVRFBanksPerLane),
     .VLEN     (VLEN     ),
     .vaddr_t  (vaddr_t  ),
     .pe_req_t (pe_req_t ),
@@ -647,6 +658,8 @@ module ara import ara_pkg::*; #(
     .masku_vrgat_req_valid_o (masku_vrgat_req_valid           ),
     .masku_vrgat_req_ready_i (masku_vrgat_req_ready           ),
     .masku_vrgat_req_o       (masku_vrgat_req                 ),
+    // Interface with the lanes and parallel permutation network
+    // .ppn_mask_i              (ppn_mask                        )
     // Interface with the VFUs
     .mask_o                  (mask                            ),
     .mask_valid_o            (mask_valid                      ),
@@ -656,6 +669,15 @@ module ara import ara_pkg::*; #(
     .vstu_mask_ready_i       (vstu_mask_ready                 ),
     .sldu_mask_ready_i       (sldu_mask_ready                 )
   );
+
+  ///////////////////////////////
+  //  SIMD Permutation Network //
+  ///////////////////////////////
+
+  // elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut;
+  // logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid;
+
+
 
   //////////////////
   //  Assertions  //

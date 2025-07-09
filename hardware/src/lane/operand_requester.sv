@@ -255,6 +255,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic is_widening;
     // One-bit counters
     logic [NrVInsn-1:0] waw_hazard_counter;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } requester_metadata_t;
 
   for (genvar b = 0; b < NrBanks; b++) begin
@@ -327,6 +330,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         scaled_vector_len_elements += 1;
 
       // Final computed length
+      // TODO: modify based on lut_mode 
       effective_vector_body_length = (operand_request_i[requester_index].scale_vl)
                                    ? scaled_vector_len_elements
                                    : operand_request_i[requester_index].vl;
@@ -337,6 +341,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       vrf_addr = vaddr(operand_request_i[requester_index].vs, NrLanes, VLEN)
                + (operand_request_i[requester_index].vstart >>
                    (unsigned'(EW64) - unsigned'(operand_request_i[requester_index].eew)));
+
       // Init helper variables
       requester_metadata_tmp = '{
         id          : operand_request_i[requester_index].id,
@@ -345,6 +350,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         vew         : operand_request_i[requester_index].eew,
         hazard      : operand_request_i[requester_index].hazard,
         is_widening : operand_request_i[requester_index].cvt_resize == CVT_WIDE,
+        lut_mode    : operand_request_i[requester_index].lut_mode,
         default: '0
       };
       operand_queue_cmd_tmp = '{
@@ -401,8 +407,25 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
           if (operand_queue_ready_i[requester_index]) begin
             automatic vlen_t num_elements;
 
+            // `ifdef DEBUG
+            // if(requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
+            //   $display("[LANE OP REQ] lut_mode=%h", requester_metadata_q.lut_mode);
+            //   $display("[LANE OP REQ] addr=%d", requester_metadata_q.addr);
+            // end
+            // `endif
+
             // Operand request
-            lane_operand_req_transposed[requester_index][bank] = !stall;
+            // TODO: activate all banks
+
+            if(requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
+              lane_operand_req_transposed[requester_index] = {NrBanks{!stall}};
+              // `ifdef DEBUG
+              // $display("[OP REQ] lut_mode=%h, bank=%d, stall=%h", requester_metadata_q.lut_mode, bank, stall);
+              // $display("Lane_operand_req_transposed=%h", lane_operand_req_transposed[requester_index]);
+              // `endif
+            end else begin
+              lane_operand_req_transposed[requester_index][bank] = !stall;
+            end
             operand_payload[requester_index]   = '{
               addr   : requester_metadata_q.addr >> $clog2(NrBanks),
               opqueue: opqueue_e'(requester_index),
@@ -411,11 +434,24 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
             // Received a grant.
             if (|operand_requester_gnt) begin : op_req_grant
-              // Bump the address pointer
-              requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;
+              if (requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
+                // Bump addr pointer based on lut_mode 
+                automatic int addr_offset = NrBanks * NrLanes;
+                // automatic logic [3:0] addr_offset_log2 = $clog2(addr_offset);
+                // TODO: needs to be checked when LMUL > 1
+                requester_metadata_d.addr = requester_metadata_q.addr + vaddr(1, NrLanes, VLEN);
+                num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) + $clog2(NrBanks) ) );
 
-              // We read less than 64 bits worth of elements
-              num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) ) );
+                // `ifdef DEBUG
+                // $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
+                // `endif
+              end else begin
+                // Bump the address pointer
+                requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;
+                // We read less than 64 bits worth of elements
+                num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) ) );
+              end
+
               if (requester_metadata_q.len < num_elements) begin
                 requester_metadata_d.len    = 0;
               end
@@ -423,6 +459,10 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
                 requester_metadata_d.len = requester_metadata_q.len - num_elements;
               end
             end : op_req_grant
+
+            // `ifdef DEBUG
+            // $display("[OP REQ] d.len=%d", requester_metadata_d.len);
+            // `endif
 
             // Finished requesting all the elements
             if (requester_metadata_d.len == '0) begin

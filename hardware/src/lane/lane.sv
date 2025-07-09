@@ -106,7 +106,10 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     // Interface between the Mask unit and the VFUs
     input  strb_t                                          mask_i,
     input  logic                                           mask_valid_i,
-    output logic                                           mask_ready_o
+    output logic                                           mask_ready_o,
+    // Operands for parallel LUT
+    output elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_o,
+    output logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid_o
   );
 
   `include "common_cells/registers.svh"
@@ -142,6 +145,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
     // Hazards
     logic [NrVInsn-1:0] hazard;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } operand_request_cmd_t;
 
   typedef struct packed {
@@ -182,6 +188,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     vlen_t vl;
     vlen_t vstart;
     rvv_pkg::vtype_t vtype;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } vfu_operation_t;
 
   /////////////////
@@ -273,6 +282,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .masku_vrgat_req_valid_i(masku_vrgat_req_valid_i ),
     .masku_vrgat_req_ready_o(masku_vrgat_req_ready_o ),
     .masku_vrgat_req_i      (masku_vrgat_req_i       )
+    // Operands for parallel LUT
+    // .masku_operand_lut_o    (masku_operand_lut      ),
+    // .masku_operand_lut_valid_o(masku_operand_lut_valid)
   );
 
   /////////////////////////
@@ -408,27 +420,39 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .tgt_opqueue_i  (vrf_tgt_opqueue  ),
     // Interface with the operand queues
     .operand_o      (vrf_operand      ),
-    .operand_valid_o(vrf_operand_valid)
+    .operand_valid_o(vrf_operand_valid),
+    // Operands for parallel LUT
+    .operand_lut_o  (vrf_operand_lut_o  ),
+    .operand_lut_valid_o(vrf_operand_lut_valid_o)
   );
 
   `ifdef DEBUG
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
+    if(&vrf_operand_lut_valid_o) begin
+      $display("Lane-%d [VRF] operand_lut_valid=%h", lane_id_i, vrf_operand_lut_valid_o);
+    end
+
     for(int i=0; i<NrVRFBanksPerLane; i++) begin
-      if(vrf_req[i] && vrf_wen[i]) begin
-        $display("Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
+      // if(vrf_req[i] && vrf_wen[i]) begin
+      //   $display("Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
+      //   $display("VRF_REQ=%h", vrf_req);
+      // end
+
+      if(&vrf_req && i==0 && lane_id_i==0) begin
+        $display("All-bank Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
       end
     end
 
-    for(int i=0; i<NrOperandQueues; i++) begin
-      if(vrf_operand_valid[i]) begin
-        $display("Lane-%d [VRF] operand_queue[%d]: operand=%h", lane_id_i, i, vrf_operand[i]);
-      end
-    end
+    // for(int i=0; i<NrOperandQueues; i++) begin
+    //   if(vrf_operand_valid[i]) begin
+    //     $display("Lane-%d [VRF] operand_queue[%d]: operand=%h", lane_id_i, i, vrf_operand[i]);
+    //   end
+    // end
 
-    if(stu_operand_valid_o) begin
-      $display("Lane-%d [STU] operand=%h", lane_id_i, stu_operand_o);
-    end
+    // if(stu_operand_valid_o) begin
+    //   $display("Lane-%d [STU] operand=%h", lane_id_i, stu_operand_o);
+    // end
   end
   `endif
 
