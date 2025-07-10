@@ -342,8 +342,8 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
    ********************/
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_idx_o;
-  logic [NrVRFBanksPerLane-1:0] permu_operand_valid_idx_o;
-  logic [NrVRFBanksPerLane-1:0] permu_operand_ready_idx_o;
+  logic  [NrVRFBanksPerLane-1:0] permu_operand_valid_idx_o;
+  logic  [NrVRFBanksPerLane-1:0] permu_operand_ready_idx_o;
 
   operand_permu_queue #(
     .CmdBufDepth        (PermuDataQueueDepth  ),
@@ -372,8 +372,8 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
   );
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_val_o;
-  logic [NrVRFBanksPerLane-1:0] permu_operand_valid_val_o;
-  logic [NrVRFBanksPerLane-1:0] permu_operand_ready_val_o;
+  logic  [NrVRFBanksPerLane-1:0] permu_operand_valid_val_o;
+  logic  [NrVRFBanksPerLane-1:0] permu_operand_ready_val_o;
 
   operand_permu_queue #(
     .CmdBufDepth        (PermuDataQueueDepth  ),
@@ -407,10 +407,10 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
   // `ifdef DEBUG
   // always @(posedge clk_i) begin
   //   if (permu_operand_valid_idx_o) begin
-  //     $display("[Operand Queues Stage] permu_operand_ready_i=%h", permu_operand_ready_i);
+  //     $display("[Operand Queues Stage] permu_operand_valid_idx_o=%h, permu_operand_ready_i=%h", permu_operand_valid_idx_o, permu_operand_ready_i);
   //   end
   //   if (permu_operand_valid_val_o) begin
-  //     $display("[Operand Queues Stage] permu_operand_ready_i=%h", permu_operand_ready_i);
+  //     $display("[Operand Queues Stage] permu_operand_valid_val_o=%h, permu_operand_ready_i=%h", permu_operand_valid_val_o, permu_operand_ready_i);
   //   end
   // end
   // `endif

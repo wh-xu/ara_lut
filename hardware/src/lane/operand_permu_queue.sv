@@ -9,7 +9,7 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
     parameter  int           unsigned DataBufDepth        = 2,
     parameter  int           unsigned NrSlaves            = 1,
     parameter  int           unsigned NrLanes             = 0,
-    parameter  int           unsigned NrVRFBanksPerLane   = 0,
+    parameter  int           unsigned NrVRFBanksPerLane   = 8,
     parameter  int           unsigned VLEN                = 0,
     parameter  bit                    AccessCmdPop        = 0,
     parameter  type                   operand_queue_cmd_t = logic,
@@ -77,26 +77,26 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
 
   // This FIFO holds words to be used by the VFUs.
   elen_t   [NrVRFBanksPerLane-1:0] ibuf_operand;
-  logic    [NrVRFBanksPerLane-1:0] ibuf_operand_valid;
-  logic    [NrVRFBanksPerLane-1:0] ibuf_empty;
-  logic    [NrVRFBanksPerLane-1:0] ibuf_pop;
+  logic    ibuf_operand_valid;
+  logic    ibuf_empty;
+  logic    ibuf_pop;
 
   // FIFO accepts operands from all banks
   fifo_v3 #(
     .DEPTH     (DataBufDepth                  ),
     .DATA_WIDTH(DataWidth*NrVRFBanksPerLane   )
   ) i_input_buffer (
-    .clk_i     (clk_i          ),
-    .rst_ni    (rst_ni         ),
-    .testmode_i(1'b0           ),
-    .flush_i   (flush_i        ),
-    .data_i    (operand_i      ),
-    .push_i    (operand_valid_i),
-    .full_o    (/* Unused */   ),
-    .data_o    (ibuf_operand   ),
-    .pop_i     (ibuf_pop       ),
-    .empty_o   (ibuf_empty     ),
-    .usage_o   (/* Unused */   )
+    .clk_i     (clk_i           ),
+    .rst_ni    (rst_ni          ),
+    .testmode_i(1'b0            ),
+    .flush_i   (flush_i         ),
+    .data_i    (operand_i       ),
+    .push_i    (&operand_valid_i),
+    .full_o    (/* Unused */    ),
+    .data_o    (ibuf_operand    ),
+    .pop_i     (ibuf_pop        ),
+    .empty_o   (ibuf_empty      ),
+    .usage_o   (/* Unused */    )
   );
   assign ibuf_operand_valid = !ibuf_empty;
 
@@ -157,8 +157,7 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
 
     // Send the operand
     operand_o       = conv_operand;
-    operand_valid_o = ibuf_operand_valid;
-    // Encode the target functional unit when it is not clear
+    operand_valid_o = {NrVRFBanksPerLane{ibuf_operand_valid}};
     // Default encoding: SLDU == 1'b0, ADDRGEN == 1'b1
     operand_target_fu_o = cmd.target_fu;
 

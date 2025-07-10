@@ -32,7 +32,7 @@ sources:
     # Sources
     # Level 0
     - hardware/src/segment_sequencer.sv
-    - hardware/src/perm/simd_perm_wrapper.sv
+    - hardware/src/perm/SimdPermWrapper.sv
     - hardware/src/perm/SimdPermutation.sv
     # Level 1
     - hardware/src/ctrl_registers.sv

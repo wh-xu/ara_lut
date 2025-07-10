@@ -6,7 +6,7 @@
 // Description:
 // Ara's top-level, interfacing with Ariane.
 
-module ara import ara_pkg::*; #(
+module ara import ara_pkg::*; import rvv_pkg::*; #(
     // RVV Parameters
     parameter  int           unsigned NrLanes      = 0,                          // Number of parallel vector lanes.
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
@@ -486,19 +486,19 @@ module ara import ara_pkg::*; #(
   //  SIMD Permutation Network //
   ///////////////////////////////
 
-  logic io_inValid;
-  logic io_inReady;
-  logic io_selIdxVal;
-  logic io_permute;
-  logic [2:0] io_mode;
+  logic operand_valid_i;
+  logic operand_ready_o;
+  logic selIdxVal;
+  logic permute_i;
+  vlut_e lut_mode_i;
 
-  logic io_outReady;
-  logic [NrVRFBanksPerLane-1:0] io_outReady_Lane;
-  logic io_outValid;
+  logic result_ready_i;
+  logic [NrVRFBanksPerLane-1:0] result_ready_Lane;
+  logic result_valid_o;
   logic [NrVRFBanksPerLane-1:0] io_outValid_Lane;
   elen_t [NrVRFBanksPerLane-1:0] io_outData;
 
-  simd_perm #(
+  SimdPermWrapper #(
     .NumLanes(NrLanes),
     .NumBanks(NrVRFBanksPerLane),
     .NumSegments(NrVRFBanksPerLane),
@@ -506,17 +506,17 @@ module ara import ara_pkg::*; #(
     .SizeXbar(32)
   ) i_simd_perm (
     // Declare some signals so we can see how I/O works
-    .clk_i(clk_i),
-    .rst_ni(rst_ni),
-    .io_inValid(io_inValid),
-    .io_inReady(io_inReady),
-    .io_selIdxVal(io_selIdxVal),
-    .io_inData(permu_operand_o),
-    .io_permute(io_permute),
-    .io_mode(io_mode),
-    .io_outReady(io_outReady),
-    .io_outValid(io_outValid),
-    .io_outData(io_outData)
+    .clk_i              (clk_i              ),
+    .rst_ni             (rst_ni             ),
+    .operand_valid_i    (operand_valid_i    ),
+    .operand_ready_o    (operand_ready_o    ),
+    .selIdxVal          (selIdxVal          ),
+    .operand_i          (permu_operand_o    ),
+    .permute_i          (permute_i          ),
+    .lut_mode_i         (lut_mode_i         ),
+    .result_ready_i     (result_ready_i     ),
+    .result_valid_o     (result_valid_o     ),
+    .result_o           (io_outData         )
   );
 
       // .permu_operand_o                (permu_operand_o[lane]             ),
@@ -529,15 +529,19 @@ module ara import ara_pkg::*; #(
       // .permu_result_gnt_o             (permu_result_gnt_o[lane]          ),
       // .permu_result_final_gnt_o       (permu_result_final_gnt_o[lane]    )
 
-  assign io_inValid = &permu_operand_valid_o;
-  // assign io_outValid_Lane = {NrVRFBanksPerLane{io_outValid}};
-  assign io_outReady = &io_outReady_Lane;
-  assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){io_inReady}};
+  assign operand_valid_i = &permu_operand_valid_o;
+  // assign result_ready_i = &result_ready_Lane;
+  assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){operand_ready_o}};
+  // assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){result_valid_o}};
 
   `ifdef DEBUG
   always_ff @(posedge clk_i) begin
-    if (io_inReady) begin
-      $display("[ara] io_inValid=%d, io_inReady=%d", io_inValid, io_inReady);
+    // if (operand_ready_o) begin
+    //   $display("[ara] operand_ready_o=%d", operand_ready_o);
+    // end
+
+    if (operand_valid_i) begin
+      $display("[ara] operand_valid_i=%d=", operand_valid_i);
     end
   end
   `endif

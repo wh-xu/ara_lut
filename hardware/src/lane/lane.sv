@@ -426,6 +426,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_vrf_o;
   logic  [NrVRFBanksPerLane-1:0] permu_operand_vrf_valid_o;
+  // logic  [NrVRFBanksPerLane-1:0] permu_operand_vrf_ready_i;
 
   vector_regfile #(
     .VRFSize(VRFSizePerLane   ),
@@ -462,13 +463,13 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
       //   $display("VRF_REQ=%h", vrf_req);
       // end
 
-      if(&vrf_req && i==0 && lane_id_i==0) begin
-        $display("[Lane] All-bank Fetch: addr=%h, be=%h, wdata=%h", vrf_addr[i], vrf_be[i], vrf_wdata[i]);
-      end
+      // if(&vrf_req && i==0 && lane_id_i==0) begin
+      //   $display("[Lane] All-bank Fetch: addr=%h, be=%h, wdata=%h", vrf_addr[i], vrf_be[i], vrf_wdata[i]);
+      // end
 
-      if(&permu_operand_valid_o && i==0) begin
-        $display("[Lane]-%d [operand_queues_stage] permu_operand_o=%h", lane_id_i, permu_operand_o);
-      end
+      // if(&permu_operand_valid_o && i==0) begin
+      //   $display("[Lane]-%d [operand_queues_stage] permu_operand_o=%h", lane_id_i, permu_operand_o);
+      // end
     end
   end
   `endif
@@ -496,6 +497,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   operand_queues_stage #(
     .NrLanes            (NrLanes            ),
+    .NrVRFBanksPerLane  (NrVRFBanksPerLane  ),
     .VLEN               (VLEN               ),
     .FPUSupport         (FPUSupport         ),
     .operand_queue_cmd_t(operand_queue_cmd_t)
