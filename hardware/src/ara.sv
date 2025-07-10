@@ -12,8 +12,7 @@ module ara import ara_pkg::*; #(
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
     parameter  int           unsigned OSSupport    = 1,
     // Support for floating-point data types
-    parameter  fpu_support_e          FPUSupport   = FPUSupportHalf,
-    // parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
+    parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
     // External support for vfrec7, vfrsqrt7
     parameter  fpext_support_e        FPExtSupport = FPExtSupportEnable,
     // Support for fixed-point data types
@@ -316,6 +315,14 @@ module ara import ara_pkg::*; #(
     .lsu_current_burst_exception_i(lsu_current_burst_exception)
   );
 
+  `ifdef DEBUG
+  always_ff @(posedge clk_i) begin
+    if(pe_req_valid) begin
+      $display("[ARA] pe_req: op=%h, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, lut_mode=%h", pe_req.op, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.lut_mode);
+    end
+  end
+  `endif
+
   // Scalar move support
   always_comb begin
     masku_operand_ready_lane = masku_operand_ready_masku;
@@ -370,8 +377,16 @@ module ara import ara_pkg::*; #(
   logic      [NrLanes-1:0]                     masku_vrgat_req_ready;
   vrgat_req_t                                  masku_vrgat_req;
   // Parallel LUT
-  elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut;
-  logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid;
+  elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_o;
+  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_valid_o;
+  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_ready_i;
+  logic      [NrLanes-1:0]                     permu_result_req_i;
+  vid_t      [NrLanes-1:0]                     permu_result_id_i;
+  vaddr_t    [NrLanes-1:0]                     permu_result_addr_i;
+  elen_t     [NrLanes-1:0]                     permu_result_wdata_i;
+  strb_t     [NrLanes-1:0]                     permu_result_be_i;
+  logic      [NrLanes-1:0]                     permu_result_gnt_o;
+  logic      [NrLanes-1:0]                     permu_result_final_gnt_o;
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin: gen_lanes
     lane #(
@@ -453,10 +468,79 @@ module ara import ara_pkg::*; #(
       .mask_valid_i                    (mask_valid[lane] & mask_valid_lane  ),
       .mask_ready_o                    (lane_mask_ready[lane]               ),
       // Interface with the parallel permutation network in mask unit
-      .vrf_operand_lut_o               (vrf_operand_lut[lane]             ),
-      .vrf_operand_lut_valid_o         (vrf_operand_lut_valid[lane]       )
+      .permu_operand_o                (permu_operand_o[lane]             ),
+      .permu_operand_valid_o          (permu_operand_valid_o[lane]       ),
+      .permu_operand_ready_i          (permu_operand_ready_i[lane]       ),
+      .permu_result_req_i             (permu_result_req_i[lane]          ),
+      .permu_result_id_i              (permu_result_id_i[lane]           ),
+      .permu_result_addr_i            (permu_result_addr_i[lane]         ),
+      .permu_result_wdata_i           (permu_result_wdata_i[lane]        ),
+      .permu_result_be_i              (permu_result_be_i[lane]           ),
+      .permu_result_gnt_o             (permu_result_gnt_o[lane]          ),
+      .permu_result_final_gnt_o       (permu_result_final_gnt_o[lane]    )
     );
   end: gen_lanes
+
+
+  ///////////////////////////////
+  //  SIMD Permutation Network //
+  ///////////////////////////////
+
+  logic io_inValid;
+  logic io_inReady;
+  logic io_selIdxVal;
+  logic io_permute;
+  logic [2:0] io_mode;
+
+  logic io_outReady;
+  logic [NrVRFBanksPerLane-1:0] io_outReady_Lane;
+  logic io_outValid;
+  logic [NrVRFBanksPerLane-1:0] io_outValid_Lane;
+  elen_t [NrVRFBanksPerLane-1:0] io_outData;
+
+  simd_perm #(
+    .NumLanes(NrLanes),
+    .NumBanks(NrVRFBanksPerLane),
+    .NumSegments(NrVRFBanksPerLane),
+    .NumRotationRadix(4),
+    .SizeXbar(32)
+  ) i_simd_perm (
+    // Declare some signals so we can see how I/O works
+    .clk_i(clk_i),
+    .rst_ni(rst_ni),
+    .io_inValid(io_inValid),
+    .io_inReady(io_inReady),
+    .io_selIdxVal(io_selIdxVal),
+    .io_inData(permu_operand_o),
+    .io_permute(io_permute),
+    .io_mode(io_mode),
+    .io_outReady(io_outReady),
+    .io_outValid(io_outValid),
+    .io_outData(io_outData)
+  );
+
+      // .permu_operand_o                (permu_operand_o[lane]             ),
+      // .permu_operand_valid_o          (permu_operand_valid_o[lane]       ),
+      // .permu_result_req_i             (permu_result_req_i[lane]          ),
+      // .permu_result_id_i              (permu_result_id_i[lane]           ),
+      // .permu_result_addr_i            (permu_result_addr_i[lane]         ),
+      // .permu_result_wdata_i           (permu_result_wdata_i[lane]        ),
+      // .permu_result_be_i              (permu_result_be_i[lane]           ),
+      // .permu_result_gnt_o             (permu_result_gnt_o[lane]          ),
+      // .permu_result_final_gnt_o       (permu_result_final_gnt_o[lane]    )
+
+  assign io_inValid = &permu_operand_valid_o;
+  // assign io_outValid_Lane = {NrVRFBanksPerLane{io_outValid}};
+  assign io_outReady = &io_outReady_Lane;
+  assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){io_inReady}};
+
+  `ifdef DEBUG
+  always_ff @(posedge clk_i) begin
+    if (io_inReady) begin
+      $display("[ara] io_inValid=%d, io_inReady=%d", io_inValid, io_inReady);
+    end
+  end
+  `endif
 
 
   //////////////////////////////
@@ -628,7 +712,6 @@ module ara import ara_pkg::*; #(
 
   masku #(
     .NrLanes  (NrLanes  ),
-    .NrVRFBanksPerLane(NrVRFBanksPerLane),
     .VLEN     (VLEN     ),
     .vaddr_t  (vaddr_t  ),
     .pe_req_t (pe_req_t ),
@@ -658,8 +741,6 @@ module ara import ara_pkg::*; #(
     .masku_vrgat_req_valid_o (masku_vrgat_req_valid           ),
     .masku_vrgat_req_ready_i (masku_vrgat_req_ready           ),
     .masku_vrgat_req_o       (masku_vrgat_req                 ),
-    // Interface with the lanes and parallel permutation network
-    // .ppn_mask_i              (ppn_mask                        )
     // Interface with the VFUs
     .mask_o                  (mask                            ),
     .mask_valid_o            (mask_valid                      ),
@@ -669,14 +750,6 @@ module ara import ara_pkg::*; #(
     .vstu_mask_ready_i       (vstu_mask_ready                 ),
     .sldu_mask_ready_i       (sldu_mask_ready                 )
   );
-
-  ///////////////////////////////
-  //  SIMD Permutation Network //
-  ///////////////////////////////
-
-  // elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut;
-  // logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid;
-
 
 
   //////////////////

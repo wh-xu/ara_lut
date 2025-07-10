@@ -406,18 +406,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
           if (operand_queue_ready_i[requester_index]) begin
             automatic vlen_t num_elements;
-
-            // `ifdef DEBUG
-            // if(requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
-            //   $display("[LANE OP REQ] lut_mode=%h", requester_metadata_q.lut_mode);
-            //   $display("[LANE OP REQ] addr=%d", requester_metadata_q.addr);
-            // end
-            // `endif
-
             // Operand request
             // TODO: activate all banks
-
-            if(requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
+            if(requester_metadata_q.lut_mode > rvv_pkg::CBSEQ) begin
               lane_operand_req_transposed[requester_index] = {NrBanks{!stall}};
               // `ifdef DEBUG
               // $display("[OP REQ] lut_mode=%h, bank=%d, stall=%h", requester_metadata_q.lut_mode, bank, stall);
@@ -434,7 +425,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
             // Received a grant.
             if (|operand_requester_gnt) begin : op_req_grant
-              if (requester_metadata_q.lut_mode != rvv_pkg::CBSEQ) begin
+              if (requester_metadata_q.lut_mode > rvv_pkg::CBSEQ) begin
                 // Bump addr pointer based on lut_mode 
                 automatic int addr_offset = NrBanks * NrLanes;
                 // automatic logic [3:0] addr_offset_log2 = $clog2(addr_offset);
@@ -442,9 +433,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
                 requester_metadata_d.addr = requester_metadata_q.addr + vaddr(1, NrLanes, VLEN);
                 num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) + $clog2(NrBanks) ) );
 
-                // `ifdef DEBUG
-                // $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
-                // `endif
+                `ifdef DEBUG
+                $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
+                `endif
               end else begin
                 // Bump the address pointer
                 requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;
@@ -584,6 +575,15 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       opqueue: AluA,
       default: '0
     };
+    // TODO: add perm unit
+    operand_payload[NrOperandQueues + VFU_PermUnit] = '{
+      addr   : ldu_result_addr >> $clog2(NrBanks),
+      wen    : 1'b1,
+      wdata  : ldu_result_wdata,
+      be     : ldu_result_be,
+      opqueue: AluA,
+      default: '0
+    };
 
     // Store their request value
     ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] =
@@ -644,7 +644,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic payload_lp_req;
     logic payload_lp_gnt;
     rr_arb_tree #(
-      .NumIn(unsigned'(SlideAddrGenA)- unsigned'(MaskB) + 1 + unsigned'(VFU_LoadUnit) - unsigned'(VFU_SlideUnit) + 1),
+      .NumIn(unsigned'(PermVal)- unsigned'(MaskB) + 1 + unsigned'(VFU_PermUnit) - unsigned'(VFU_SlideUnit) + 1),
       .DataWidth($bits(payload_t)                                                               ),
       .AxiVldRdy(1'b0                                                                           )
     ) i_lp_vrf_arbiter (
@@ -652,12 +652,12 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .rst_ni (rst_ni),
       .flush_i(1'b0  ),
       .rr_i   ('0    ),
-      .data_i ({operand_payload[SlideAddrGenA:MaskB],
-          operand_payload[NrOperandQueues + VFU_LoadUnit:NrOperandQueues + VFU_SlideUnit]} ),
-      .req_i ({lane_operand_req[bank][SlideAddrGenA:MaskB],
-          ext_operand_req[bank][VFU_LoadUnit:VFU_SlideUnit]}),
-      .gnt_o ({operand_gnt[bank][SlideAddrGenA:MaskB],
-          operand_gnt[bank][NrOperandQueues + VFU_LoadUnit:NrOperandQueues + VFU_SlideUnit]}),
+      .data_i ({operand_payload[PermVal:MaskB],
+          operand_payload[NrOperandQueues + VFU_PermUnit:NrOperandQueues + VFU_SlideUnit]} ),
+      .req_i ({lane_operand_req[bank][PermVal:MaskB],
+          ext_operand_req[bank][VFU_PermUnit:VFU_SlideUnit]}),
+      .gnt_o ({operand_gnt[bank][PermVal:MaskB],
+          operand_gnt[bank][NrOperandQueues + VFU_PermUnit:NrOperandQueues + VFU_SlideUnit]}),
       .data_o (payload_lp    ),
       .idx_o  (/* Unused */  ),
       .req_o  (payload_lp_req),

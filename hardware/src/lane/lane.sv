@@ -108,8 +108,17 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                                           mask_valid_i,
     output logic                                           mask_ready_o,
     // Operands for parallel LUT
-    output elen_t [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_o,
-    output logic  [NrVRFBanksPerLane-1:0]                  vrf_operand_lut_valid_o
+    output elen_t [NrVRFBanksPerLane-1:0]                  permu_operand_o,
+    output logic  [NrVRFBanksPerLane-1:0]                  permu_operand_valid_o,
+    input  logic  [NrVRFBanksPerLane-1:0]                  permu_operand_ready_i,
+    // Returned results from parallel LUT
+    input  logic                                           permu_result_req_i,
+    input  vid_t                                           permu_result_id_i,
+    input  vaddr_t                                         permu_result_addr_i,
+    input  elen_t [NrVRFBanksPerLane-1:0]                  permu_result_wdata_i,
+    input  strb_t                                          permu_result_be_i,
+    output logic                                           permu_result_gnt_o,
+    output logic                                           permu_result_final_gnt_o
   );
 
   `include "common_cells/registers.svh"
@@ -282,10 +291,21 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .masku_vrgat_req_valid_i(masku_vrgat_req_valid_i ),
     .masku_vrgat_req_ready_o(masku_vrgat_req_ready_o ),
     .masku_vrgat_req_i      (masku_vrgat_req_i       )
-    // Operands for parallel LUT
-    // .masku_operand_lut_o    (masku_operand_lut      ),
-    // .masku_operand_lut_valid_o(masku_operand_lut_valid)
   );
+
+  `ifdef DEBUG
+  always @(posedge clk_i) begin
+    if(operand_request_valid[PermIdx] && operand_request_ready[PermIdx]) begin
+      $display("[LANE] Perm-idx-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
+      operand_request[PermIdx].vs, operand_request[PermIdx].scale_vl, operand_request[PermIdx].eew, operand_request[PermIdx].vl, operand_request[PermIdx].vtype, operand_request[PermIdx].vstart, operand_request[PermIdx].hazard, operand_request[PermIdx].target_fu, operand_request[PermIdx].lut_mode);
+    end
+
+    if(operand_request_valid[PermVal] && operand_request_ready[PermVal]) begin
+      $display("[LANE] Perm-val-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
+      operand_request[PermVal].vs, operand_request[PermVal].scale_vl, operand_request[PermVal].eew, operand_request[PermVal].vl, operand_request[PermVal].vtype, operand_request[PermVal].vstart, operand_request[PermVal].hazard, operand_request[PermVal].target_fu, operand_request[PermVal].lut_mode);
+     end
+  end
+  `endif
 
   /////////////////////////
   //  Operand Requester  //
@@ -404,6 +424,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   elen_t [NrOperandQueues-1:0] vrf_operand;
   logic  [NrOperandQueues-1:0] vrf_operand_valid;
 
+  elen_t [NrVRFBanksPerLane-1:0] permu_operand_vrf_o;
+  logic  [NrVRFBanksPerLane-1:0] permu_operand_vrf_valid_o;
+
   vector_regfile #(
     .VRFSize(VRFSizePerLane   ),
     .NrBanks(NrVRFBanksPerLane),
@@ -422,37 +445,31 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .operand_o      (vrf_operand      ),
     .operand_valid_o(vrf_operand_valid),
     // Operands for parallel LUT
-    .operand_lut_o  (vrf_operand_lut_o  ),
-    .operand_lut_valid_o(vrf_operand_lut_valid_o)
+    .operand_permu_o      (permu_operand_vrf_o      ),
+    .operand_permu_valid_o(permu_operand_vrf_valid_o)
   );
 
   `ifdef DEBUG
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
-    if(&vrf_operand_lut_valid_o) begin
-      $display("Lane-%d [VRF] operand_lut_valid=%h", lane_id_i, vrf_operand_lut_valid_o);
-    end
 
     for(int i=0; i<NrVRFBanksPerLane; i++) begin
+      // if(&permu_operand_vrf_valid_o && i==0) begin
+      //   $display("[Lane]-%d [VRF] operand_lut_valid=%h", lane_id_i, permu_operand_vrf_valid_o);
+      // end
       // if(vrf_req[i] && vrf_wen[i]) begin
       //   $display("Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
       //   $display("VRF_REQ=%h", vrf_req);
       // end
 
       if(&vrf_req && i==0 && lane_id_i==0) begin
-        $display("All-bank Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
+        $display("[Lane] All-bank Fetch: addr=%h, be=%h, wdata=%h", vrf_addr[i], vrf_be[i], vrf_wdata[i]);
+      end
+
+      if(&permu_operand_valid_o && i==0) begin
+        $display("[Lane]-%d [operand_queues_stage] permu_operand_o=%h", lane_id_i, permu_operand_o);
       end
     end
-
-    // for(int i=0; i<NrOperandQueues; i++) begin
-    //   if(vrf_operand_valid[i]) begin
-    //     $display("Lane-%d [VRF] operand_queue[%d]: operand=%h", lane_id_i, i, vrf_operand[i]);
-    //   end
-    // end
-
-    // if(stu_operand_valid_o) begin
-    //   $display("Lane-%d [STU] operand=%h", lane_id_i, stu_operand_o);
-    // end
   end
   `endif
 
@@ -522,7 +539,14 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     // Mask Unit
     .mask_operand_o                   (mask_operand_o[1:0]                ),
     .mask_operand_valid_o             (mask_operand_valid_o[1:0]          ),
-    .mask_operand_ready_i             (mask_operand_ready_i[1:0]          )
+    .mask_operand_ready_i             (mask_operand_ready_i[1:0]          ),
+    // Parallel Perm. Unit
+    .permu_operand_i                   (permu_operand_vrf_o               ),
+    .permu_operand_valid_i             (permu_operand_vrf_valid_o         ),
+    .permu_operand_ready_o             (permu_operand_ready_o             ),
+    .permu_operand_o                   (permu_operand_o                   ),
+    .permu_operand_valid_o             (permu_operand_valid_o             ),
+    .permu_operand_ready_i             (permu_operand_ready_i             )
   );
 
   ///////////////////////////////

@@ -7,8 +7,9 @@
 // This stage holds the operand queues, holding elements for the VRFs.
 
 module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
-    parameter int     unsigned NrLanes          = 0,
-    parameter int     unsigned VLEN             = 0,
+    parameter int     unsigned NrLanes           = 0,
+    parameter int     unsigned NrVRFBanksPerLane = 0,
+    parameter int     unsigned VLEN              = 0,
     // Support for floating-point data types
     parameter fpu_support_e FPUSupport          = FPUSupportHalfSingleDouble,
     parameter type          operand_queue_cmd_t = logic
@@ -52,7 +53,14 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     // Mask unit
     output elen_t              [1:0]                 mask_operand_o,
     output logic               [1:0]                 mask_operand_valid_o,
-    input  logic               [1:0]                 mask_operand_ready_i
+    input  logic               [1:0]                 mask_operand_ready_i,
+    // Parallel Perm interface with the Vector Register File
+    input  elen_t            [NrVRFBanksPerLane-1:0] permu_operand_i,
+    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_i,
+    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_ready_o,
+    output elen_t            [NrVRFBanksPerLane-1:0] permu_operand_o,
+    output logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_o,
+    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_ready_i
   );
 
   `include "common_cells/registers.svh"
@@ -328,6 +336,84 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_valid_o          (mask_operand_valid_o[0]         ),
     .operand_ready_i          (mask_operand_ready_i[0]         )
   );
+
+  /********************
+   *  SIMD Perm Unit  *
+   ********************/
+
+  elen_t [NrVRFBanksPerLane-1:0] permu_operand_idx_o;
+  logic [NrVRFBanksPerLane-1:0] permu_operand_valid_idx_o;
+  logic [NrVRFBanksPerLane-1:0] permu_operand_ready_idx_o;
+
+  operand_permu_queue #(
+    .CmdBufDepth        (PermuDataQueueDepth  ),
+    .DataBufDepth       (PermuDataQueueDepth  ),
+    .AccessCmdPop       (1'b1                 ),
+    .NrLanes            (NrLanes              ),
+    .NrVRFBanksPerLane  (NrVRFBanksPerLane   ),
+    .VLEN               (VLEN                 ),
+    .operand_queue_cmd_t(operand_queue_cmd_t  )
+  ) i_operand_queue_perm_idx (
+    .clk_i                    (clk_i                                   ),
+    .rst_ni                   (rst_ni                                  ),
+    .flush_i                  (1'b0                                    ),
+    .lane_id_i                (lane_id_i                               ),
+    .operand_queue_cmd_i      (operand_queue_cmd_i[PermIdx]            ),
+    .operand_queue_cmd_valid_i(operand_queue_cmd_valid_i[PermIdx]      ),
+    .cmd_pop_o                (/* Unused */                            ),
+    .operand_i                (permu_operand_i                         ),
+    .operand_valid_i          (permu_operand_valid_i                   ),
+    .operand_issued_i         (operand_issued_i[PermIdx]               ),
+    .operand_queue_ready_o    (operand_queue_ready_o[PermIdx]          ),
+    .operand_o                (permu_operand_idx_o                     ),
+    .operand_target_fu_o      (/* Unused */                            ),
+    .operand_valid_o          (permu_operand_valid_idx_o               ),
+    .operand_ready_i          (permu_operand_ready_i                   )
+  );
+
+  elen_t [NrVRFBanksPerLane-1:0] permu_operand_val_o;
+  logic [NrVRFBanksPerLane-1:0] permu_operand_valid_val_o;
+  logic [NrVRFBanksPerLane-1:0] permu_operand_ready_val_o;
+
+  operand_permu_queue #(
+    .CmdBufDepth        (PermuDataQueueDepth  ),
+    .DataBufDepth       (PermuDataQueueDepth  ),
+    .AccessCmdPop       (1'b1                 ),
+    .NrLanes            (NrLanes              ),
+    .NrVRFBanksPerLane  (NrVRFBanksPerLane    ),
+    .VLEN               (VLEN                 ),
+    .operand_queue_cmd_t(operand_queue_cmd_t  )
+  ) i_operand_queue_perm_val (
+    .clk_i                    (clk_i                                   ),
+    .rst_ni                   (rst_ni                                  ),
+    .flush_i                  (1'b0                                    ),
+    .lane_id_i                (lane_id_i                               ),
+    .operand_queue_cmd_i      (operand_queue_cmd_i[PermVal]            ),
+    .operand_queue_cmd_valid_i(operand_queue_cmd_valid_i[PermVal]      ),
+    .cmd_pop_o                (/* Unused */                            ),
+    .operand_i                (permu_operand_i                         ),
+    .operand_valid_i          (permu_operand_valid_i                   ),
+    .operand_issued_i         (operand_issued_i[PermVal]               ),
+    .operand_queue_ready_o    (operand_queue_ready_o[PermVal]          ),
+    .operand_o                (permu_operand_val_o                     ),
+    .operand_target_fu_o      (/* Unused */                            ),
+    .operand_valid_o          (permu_operand_valid_val_o               ),
+    .operand_ready_i          (permu_operand_ready_i                   )
+  );
+
+  assign permu_operand_o = permu_operand_valid_val_o? permu_operand_val_o : permu_operand_idx_o;
+  assign permu_operand_valid_o = permu_operand_valid_val_o | permu_operand_valid_idx_o;
+
+  // `ifdef DEBUG
+  // always @(posedge clk_i) begin
+  //   if (permu_operand_valid_idx_o) begin
+  //     $display("[Operand Queues Stage] permu_operand_ready_i=%h", permu_operand_ready_i);
+  //   end
+  //   if (permu_operand_valid_val_o) begin
+  //     $display("[Operand Queues Stage] permu_operand_ready_i=%h", permu_operand_ready_i);
+  //   end
+  // end
+  // `endif
 
   // Checks
   if (VrgatherOpQueueBufDepth % 2 != 0) $fatal(1, "Parameter VrgatherOpQueueBufDepth must be power of 2.");

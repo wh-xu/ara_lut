@@ -19,7 +19,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     // Dependant parameters. DO NOT CHANGE!
     // Ara has NrLanes + 3 processing elements: each one of the lanes, the vector load unit, the
     // vector store unit, the slide unit, and the mask unit.
-    localparam int unsigned NrPEs   = NrLanes + 4,
+    // Added parallel permutation unit
+    localparam int unsigned NrPEs   = NrLanes + 4 + 1,
     localparam type         vlen_t  = logic[$clog2(VLEN+1)-1:0]
   ) (
     input  logic                            clk_i,
@@ -237,11 +238,11 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   vreg_access_t [31:0] write_list_d, write_list_q;
 
   // This function determines the VFU responsible for handling this operation.
-  function automatic vfu_e vfu(ara_op_e op`ifndef SYNTHESIS = VADD `endif);
+  function automatic vfu_e vfu(ara_op_e op`ifndef SYNTHESIS = VADD `endif, vlut_e lut_mode);
     unique case (op) inside
       [VADD:VWREDSUM]      : vfu = VFU_Alu;
       [VMUL:VFWREDOSUM]    : vfu = VFU_MFpu;
-      [VMFEQ:VCOMPRESS]    : vfu = VFU_MaskUnit;
+      [VMFEQ:VCOMPRESS]    : vfu = ((lut_mode > CBSEQ) && (op == VRGATHEREI16)) ? VFU_PermUnit : VFU_MaskUnit;
       [VLE:VLXE]           : vfu = VFU_LoadUnit;
       [VSE:VSXE]           : vfu = VFU_StoreUnit;
       [VSLIDEUP:VSLIDEDOWN]: vfu = VFU_SlideUnit;
@@ -304,6 +305,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     MaskuInsnQueueDepth,
     VlduInsnQueueDepth,
     VstuInsnQueueDepth,
+    PermuInsnQueueDepth,
     NoneInsnQueueDepth
   };
 
@@ -437,7 +439,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               op            : ara_req_i.op,
               vm            : ara_req_i.vm,
               eew_vmask     : ara_req_i.eew_vmask,
-              vfu           : vfu(ara_req_i.op),
+              vfu           : vfu(ara_req_i.op, ara_req_i.lut_mode),
               vs1           : ara_req_i.vs1,
               use_vs1       : ara_req_i.use_vs1,
               conversion_vs1: ara_req_i.conversion_vs1,
@@ -493,11 +495,12 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               ara_req_ready_o = 1'b1;
 
               // Remember that the vector instruction is running
-              unique case (vfu(ara_req_i.op))
+              unique case (vfu(ara_req_i.op, ara_req_i.lut_mode))
                 VFU_LoadUnit : pe_vinsn_running_d[NrLanes + OffsetLoad][vinsn_id_n]  = 1'b1;
                 VFU_StoreUnit: pe_vinsn_running_d[NrLanes + OffsetStore][vinsn_id_n] = 1'b1;
                 VFU_SlideUnit: pe_vinsn_running_d[NrLanes + OffsetSlide][vinsn_id_n] = 1'b1;
                 VFU_MaskUnit : pe_vinsn_running_d[NrLanes + OffsetMask][vinsn_id_n]  = 1'b1;
+                VFU_PermUnit : pe_vinsn_running_d[NrLanes + OffsetPerm][vinsn_id_n]  = 1'b1;
                 VFU_None     : ;
                 default: for (int l = 0; l < NrLanes; l++)
                     // Instruction is running on the lanes
@@ -644,6 +647,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   assign insn_queue_done[VFU_StoreUnit] = |pe_resp_i[NrLanes+OffsetStore].vinsn_done;
   assign insn_queue_done[VFU_MaskUnit]  = |pe_resp_i[NrLanes+OffsetMask].vinsn_done;
   assign insn_queue_done[VFU_SlideUnit] = |pe_resp_i[NrLanes+OffsetSlide].vinsn_done;
+  assign insn_queue_done[VFU_PermUnit]  = |pe_resp_i[NrLanes+OffsetPerm].vinsn_done;
   // Dummy counter, just for compatibility
   assign insn_queue_done[VFU_None]      = insn_queue_cnt_up[VFU_None];
 
@@ -655,7 +659,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
   // Masked instructions do use the mask unit as well
   always_comb begin
-    target_vfus_vec                = target_vfus(ara_req_i.op);
+    target_vfus_vec                = ((ara_req_i.op==VRGATHEREI16)&&(ara_req_i.lut_mode > CBSEQ)) ? VFU_PermUnit : target_vfus(ara_req_i.op);
     target_vfus_vec[VFU_MaskUnit] |= ~ara_req_i.vm;
   end
 

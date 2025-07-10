@@ -361,9 +361,9 @@ typedef struct packed {
   // It is important that all the VFUs that can write back to the VRF
   // are grouped towards the beginning of the enumeration. The store unit
   // cannot do so, therefore it is at the end of the enumeration.
-  localparam int unsigned NrVFUs = 7;
+  localparam int unsigned NrVFUs = 8;
   typedef enum logic [$clog2(NrVFUs)-1:0] {
-    VFU_Alu, VFU_MFpu, VFU_SlideUnit, VFU_MaskUnit, VFU_LoadUnit, VFU_StoreUnit, VFU_None
+    VFU_Alu, VFU_MFpu, VFU_SlideUnit, VFU_MaskUnit, VFU_LoadUnit, VFU_PermUnit, VFU_StoreUnit, VFU_None
   } vfu_e;
 
   // Internally, each lane is treated as a processing element, between indexes
@@ -371,8 +371,8 @@ typedef struct packed {
   // scale also are with index given by NrLanes plus the following offset.
   //
   // The load and the store unit must be at the beginning of this enumeration.
-  typedef enum logic [1:0] {
-    OffsetLoad, OffsetStore, OffsetMask, OffsetSlide
+  typedef enum logic [2:0] {
+    OffsetLoad, OffsetStore, OffsetMask, OffsetSlide, OffsetPerm
   } vfu_offset_e;
 
   /* The VRF data is stored into the lanes in a shuffled way, similar to how it was done
@@ -919,9 +919,9 @@ typedef struct packed {
   ////////////////////////
 
   // There are seven operand queues, serving operands to the different functional units of each lane
-  localparam int unsigned NrOperandQueues = 9;
+  localparam int unsigned NrOperandQueues = 11;
   typedef enum logic [$clog2(NrOperandQueues)-1:0] {
-    AluA, AluB, MulFPUA, MulFPUB, MulFPUC, MaskB, MaskM, StA, SlideAddrGenA
+    AluA, AluB, MulFPUA, MulFPUB, MulFPUC, MaskB, MaskM, StA, SlideAddrGenA, PermIdx, PermVal
   } opqueue_e;
 
   // Each lane has eight VRF banks
@@ -1017,6 +1017,10 @@ typedef struct packed {
     logic [4:0] vs;
     logic is_last_req;
   } vrgat_req_t;
+
+  // Parallel SIMD Unit
+  localparam int unsigned PermuInsnQueueDepth = 2;
+  localparam int unsigned PermuDataQueueDepth = 2;
 
   ////////////////////////
   // VFREC7 & VFRSQRT7 //
