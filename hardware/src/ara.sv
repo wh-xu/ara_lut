@@ -377,9 +377,9 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   logic      [NrLanes-1:0]                     masku_vrgat_req_ready;
   vrgat_req_t                                  masku_vrgat_req;
   // Parallel LUT
-  elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_o;
-  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_valid_o;
-  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_ready_i;
+  elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_lane_o;
+  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_valid_lane_o;
+  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]                  permu_operand_ready_lane_i;
   logic      [NrLanes-1:0]                     permu_result_req_i;
   vid_t      [NrLanes-1:0]                     permu_result_id_i;
   vaddr_t    [NrLanes-1:0]                     permu_result_addr_i;
@@ -468,9 +468,9 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
       .mask_valid_i                    (mask_valid[lane] & mask_valid_lane  ),
       .mask_ready_o                    (lane_mask_ready[lane]               ),
       // Interface with the parallel permutation network in mask unit
-      .permu_operand_o                (permu_operand_o[lane]             ),
-      .permu_operand_valid_o          (permu_operand_valid_o[lane]       ),
-      .permu_operand_ready_i          (permu_operand_ready_i[lane]       ),
+      .permu_operand_o                (permu_operand_lane_o[lane]             ),
+      .permu_operand_valid_o          (permu_operand_valid_lane_o[lane]       ),
+      .permu_operand_ready_i          (permu_operand_ready_lane_i[lane]       ),
       .permu_result_req_i             (permu_result_req_i[lane]          ),
       .permu_result_id_i              (permu_result_id_i[lane]           ),
       .permu_result_addr_i            (permu_result_addr_i[lane]         ),
@@ -486,65 +486,67 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   //  SIMD Permutation Network //
   ///////////////////////////////
 
-  logic operand_valid_i;
-  logic operand_ready_o;
-  logic selIdxVal;
-  logic permute_i;
-  vlut_e lut_mode_i;
+  logic  permu_operand_valid_i;
+  logic  permu_operand_ready_o;
 
-  logic result_ready_i;
-  logic [NrVRFBanksPerLane-1:0] result_ready_Lane;
-  logic result_valid_o;
-  logic [NrVRFBanksPerLane-1:0] io_outValid_Lane;
-  elen_t [NrVRFBanksPerLane-1:0] io_outData;
+  logic  permu_selIdxVal;
+  logic  permu_permute_i;
+  vlut_e permu_lut_mode_i;
+
+  logic permu_result_ready_i;
+  logic [NrVRFBanksPerLane-1:0] permu_result_ready_Lane;
+  logic permu_result_valid_o;
+
+  elen_t [NrVRFBanksPerLane-1:0] permu_result_o;
 
   SimdPermWrapper #(
     .NumLanes(NrLanes),
-    .NumBanks(NrVRFBanksPerLane),
+    .NumBanksPerLane(NrVRFBanksPerLane),
     .NumSegments(NrVRFBanksPerLane),
     .NumRotationRadix(4),
     .SizeXbar(32)
   ) i_simd_perm (
     // Declare some signals so we can see how I/O works
-    .clk_i              (clk_i              ),
-    .rst_ni             (rst_ni             ),
-    .operand_valid_i    (operand_valid_i    ),
-    .operand_ready_o    (operand_ready_o    ),
-    .selIdxVal          (selIdxVal          ),
-    .operand_i          (permu_operand_o    ),
-    .permute_i          (permute_i          ),
-    .lut_mode_i         (lut_mode_i         ),
-    .result_ready_i     (result_ready_i     ),
-    .result_valid_o     (result_valid_o     ),
-    .result_o           (io_outData         )
+    .clk_i              (clk_i                      ),
+    .rst_ni             (rst_ni                     ),
+    .operand_i          (permu_operand_lane_o       ),
+    .operand_valid_i    (permu_operand_valid_i      ),
+    .operand_ready_o    (permu_operand_ready_o      ),
+
+    .selIdxVal          (permu_selIdxVal          ),
+    .permute_i          (permu_permute_i          ),
+    .lut_mode_i         (permu_lut_mode_i         ),
+
+    .result_o           (permu_result_o           ),
+    .result_ready_i     (permu_result_ready_i     ),
+    .result_valid_o     (permu_result_valid_o     )
   );
-
-      // .permu_operand_o                (permu_operand_o[lane]             ),
-      // .permu_operand_valid_o          (permu_operand_valid_o[lane]       ),
-      // .permu_result_req_i             (permu_result_req_i[lane]          ),
-      // .permu_result_id_i              (permu_result_id_i[lane]           ),
-      // .permu_result_addr_i            (permu_result_addr_i[lane]         ),
-      // .permu_result_wdata_i           (permu_result_wdata_i[lane]        ),
-      // .permu_result_be_i              (permu_result_be_i[lane]           ),
-      // .permu_result_gnt_o             (permu_result_gnt_o[lane]          ),
-      // .permu_result_final_gnt_o       (permu_result_final_gnt_o[lane]    )
-
-  assign operand_valid_i = &permu_operand_valid_o;
-  // assign result_ready_i = &result_ready_Lane;
-  assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){operand_ready_o}};
-  // assign permu_operand_ready_i = {(NrVRFBanksPerLane*NrLanes){result_valid_o}};
 
   `ifdef DEBUG
   always_ff @(posedge clk_i) begin
-    // if (operand_ready_o) begin
-    //   $display("[ara] operand_ready_o=%d", operand_ready_o);
-    // end
-
-    if (operand_valid_i) begin
-      $display("[ara] operand_valid_i=%d=", operand_valid_i);
+    if (permu_operand_ready_o && permu_operand_valid_i) begin
+      $display("[permu_operand_i] ");
+      for(int bank=0; bank<NrVRFBanksPerLane; bank++) begin
+        $write("[bank=%d] ", bank);
+        for(int lane=0; lane<NrLanes; lane++) begin
+          $write("%h ", permu_operand_lane_o[lane][bank]);
+        end
+        $display("");
+      end
     end
   end
   `endif
+
+    // .masku_result_req_o      (masku_result_req                ),
+    // .masku_result_addr_o     (masku_result_addr               ),
+    // .masku_result_id_o       (masku_result_id                 ),
+    // .masku_result_wdata_o    (masku_result_wdata              ),
+    // .masku_result_be_o       (masku_result_be                 ),
+    // .masku_result_gnt_i      (masku_result_gnt                ),
+    // .masku_result_final_gnt_i(masku_result_final_gnt          ),
+
+  assign permu_operand_valid_i = &permu_operand_valid_lane_o;
+  assign permu_operand_ready_lane_i = {(NrVRFBanksPerLane*NrLanes){permu_operand_ready_o}};
 
 
   //////////////////////////////

@@ -433,9 +433,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
                 requester_metadata_d.addr = requester_metadata_q.addr + vaddr(1, NrLanes, VLEN);
                 num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) + $clog2(NrBanks) ) );
 
-                `ifdef DEBUG
-                $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
-                `endif
+                // `ifdef DEBUG
+                // $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
+                // `endif
               end else begin
                 // Bump the address pointer
                 requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;

@@ -293,19 +293,19 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .masku_vrgat_req_i      (masku_vrgat_req_i       )
   );
 
-  `ifdef DEBUG
-  always @(posedge clk_i) begin
-    if(operand_request_valid[PermIdx] && operand_request_ready[PermIdx]) begin
-      $display("[LANE] Perm-idx-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
-      operand_request[PermIdx].vs, operand_request[PermIdx].scale_vl, operand_request[PermIdx].eew, operand_request[PermIdx].vl, operand_request[PermIdx].vtype, operand_request[PermIdx].vstart, operand_request[PermIdx].hazard, operand_request[PermIdx].target_fu, operand_request[PermIdx].lut_mode);
-    end
+  // `ifdef DEBUG
+  // always @(posedge clk_i) begin
+  //   if(operand_request_valid[PermIdx] && operand_request_ready[PermIdx]) begin
+  //     $display("[LANE] Perm-idx-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
+  //     operand_request[PermIdx].vs, operand_request[PermIdx].scale_vl, operand_request[PermIdx].eew, operand_request[PermIdx].vl, operand_request[PermIdx].vtype, operand_request[PermIdx].vstart, operand_request[PermIdx].hazard, operand_request[PermIdx].target_fu, operand_request[PermIdx].lut_mode);
+  //   end
 
-    if(operand_request_valid[PermVal] && operand_request_ready[PermVal]) begin
-      $display("[LANE] Perm-val-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
-      operand_request[PermVal].vs, operand_request[PermVal].scale_vl, operand_request[PermVal].eew, operand_request[PermVal].vl, operand_request[PermVal].vtype, operand_request[PermVal].vstart, operand_request[PermVal].hazard, operand_request[PermVal].target_fu, operand_request[PermVal].lut_mode);
-     end
-  end
-  `endif
+  //   if(operand_request_valid[PermVal] && operand_request_ready[PermVal]) begin
+  //     $display("[LANE] Perm-val-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
+  //     operand_request[PermVal].vs, operand_request[PermVal].scale_vl, operand_request[PermVal].eew, operand_request[PermVal].vl, operand_request[PermVal].vtype, operand_request[PermVal].vstart, operand_request[PermVal].hazard, operand_request[PermVal].target_fu, operand_request[PermVal].lut_mode);
+  //    end
+  // end
+  // `endif
 
   /////////////////////////
   //  Operand Requester  //
@@ -453,22 +453,17 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   `ifdef DEBUG
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
+    if(&permu_operand_vrf_valid_o) begin
+      $display("[Lane]-%d permu_operand_o", lane_id_i);
+      for(int i=0; i<NrVRFBanksPerLane; i++) begin
+        $write("%h ", permu_operand_vrf_o[i]);
+      end
+      $display("");
+    end
 
     for(int i=0; i<NrVRFBanksPerLane; i++) begin
-      // if(&permu_operand_vrf_valid_o && i==0) begin
-      //   $display("[Lane]-%d [VRF] operand_lut_valid=%h", lane_id_i, permu_operand_vrf_valid_o);
-      // end
-      // if(vrf_req[i] && vrf_wen[i]) begin
-      //   $display("Lane-%d [VRF] bank-%01h: addr=%h, be=%h, wdata=%h, tgt_opqueue=%h", lane_id_i,i, vrf_addr[i], vrf_be[i], vrf_wdata[i], vrf_tgt_opqueue[i]);
-      //   $display("VRF_REQ=%h", vrf_req);
-      // end
-
       // if(&vrf_req && i==0 && lane_id_i==0) begin
       //   $display("[Lane] All-bank Fetch: addr=%h, be=%h, wdata=%h", vrf_addr[i], vrf_be[i], vrf_wdata[i]);
-      // end
-
-      // if(&permu_operand_valid_o && i==0) begin
-      //   $display("[Lane]-%d [operand_queues_stage] permu_operand_o=%h", lane_id_i, permu_operand_o);
       // end
     end
   end

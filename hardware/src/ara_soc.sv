@@ -12,7 +12,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
     parameter  int           unsigned OSSupport    = 1,                          // Support for OS
     // Support for floating-point data types
-    parameter  fpu_support_e          FPUSupport   = FPUSupportHalf,
+    parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
     // External support for vfrec7, vfrsqrt7
     parameter  fpext_support_e        FPExtSupport = FPExtSupportDisable,
     // Support for fixed-point data types
