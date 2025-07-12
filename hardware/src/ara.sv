@@ -482,6 +482,21 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   end: gen_lanes
 
 
+  `ifdef DEBUG
+  always_ff @(posedge clk_i) begin
+    if (pe_req) begin
+      $display("[global_hazard_table]");
+      for(int i=0; i<NrVInsn; i++) begin
+        $display("Insn %d:  ", i);
+        for(int j=0; j<NrVInsn; j++) begin
+          $write("%d ", global_hazard_table[i][j]);
+        end
+      end
+    end
+  end
+  `endif
+
+
   ///////////////////////////////
   //  SIMD Permutation Network //
   ///////////////////////////////
@@ -512,6 +527,12 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .operand_i          (permu_operand_lane_o       ),
     .operand_valid_i    (permu_operand_valid_i      ),
     .operand_ready_o    (permu_operand_ready_o      ),
+    // Interface with the main sequencer
+    // .pe_req_i                (pe_req                           ),
+    // .pe_req_valid_i          (pe_req_valid                     ),
+    // .pe_vinsn_running_i      (pe_vinsn_running                 ),
+    // .pe_req_ready_o          (pe_req_ready[NrLanes+OffsetSlide]),
+    // .pe_resp_o               (pe_resp[NrLanes+OffsetSlide]     ),
 
     .selIdxVal          (permu_selIdxVal          ),
     .permute_i          (permu_permute_i          ),

@@ -31,8 +31,9 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
    logic[ELEN*NumLanes-1:0] operand_i_deshuffled_flat [NumBanksPerLane-1:0] ;
    elen_t [NumBanksPerLane-1:0][NumLanes-1:0] operand_i_deshuffled;
 
+   // Shuffled output for sequential access
+   logic[ELEN*NumLanes-1:0] result_o_deshuffled_flat [NumBanksPerLane-1:0] ;
    elen_t [NumBanksPerLane-1:0][NumLanes-1:0] result_o_deshuffled;
-   // logic  [NrLanes*ELEN-1:0] masku_operand_alu_seq_o;
 
    always_comb begin
       // Deshuffle the input operand before sending it to the permutation network
@@ -47,21 +48,24 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
          operand_i_deshuffled[bank] = operand_i_deshuffled_flat[bank];
       end
 
-      // Shuffle the output operand before sending it to the output
-      // for(genvar bank=0; bank<NumBanksPerLane; bank++) begin
-      //    for (genvar b = 0; b < (NumLanes * ELENB); b++) begin
-      //       automatic int shuffle_idx = shuffle_index(b, NumLanes, EW16);
-      //       automatic int lane_idx    = b / ELENB; // rounded down to nearest integer
-      //       automatic int lane_offset = b % ELENB;
-      //       result_o[lane_idx][bank][8*shuffle_idx +: 8] = result_o_deshuffled[bank][lane_idx][8*lane_offset +: 8];
-      //    end
-      // end
+      // Shuffle the result operand before sending it to the output
+      for(int bank=0; bank<NumBanksPerLane; bank++) begin
+         for (int b = 0; b < (NumLanes * ELENB); b++) begin
+            automatic int deshuffle_idx = deshuffle_index(b, NumLanes, EW16);
+            automatic int lane_idx    = b / ELENB; // rounded down to nearest integer
+            automatic int lane_offset = b % ELENB;
+            result_o_deshuffled_flat[bank][8*deshuffle_idx +: 8] = result_o_deshuffled[bank][lane_idx][8*lane_offset +: 8];
+         end
+         for(int lane=0; lane<NumLanes; lane++) begin
+            result_o[lane][bank] = result_o_deshuffled_flat[bank][ELEN*lane +: ELEN];
+         end
+      end
    end
 
    `ifdef DEBUG
    always_ff @(posedge clk_i) begin
       if (operand_valid_i && operand_ready_o) begin
-         $display("[permu_wrapper_shuffled_operand_i] ");
+         $display("[permu_wrapper_deshuffled_operand_i] ");
          for(int bank=0; bank<NumBanksPerLane; bank++) begin
             $display("[bank=%d] ", bank);
             for(int lane=0; lane<NumLanes; lane++) begin

@@ -626,11 +626,6 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                   csr_vtype_d = vtype_xlen(xlen_t'(insn.vsetivli_type.zimm10));
                 end else if (insn.vsetvl_type.func7 == 7'b100_0000) begin // vsetvl
                   csr_vtype_d = vtype_xlen(xlen_t'(acc_req_i.rs2[10:0]));
-
-                  // `ifdef DEBUG
-                  // $display("vsetvl rs2: %h", acc_req_i.rs2);
-                  // $display("csr_vtype_d: %h", csr_vtype_d);
-                  // `endif
                 end else
                   illegal_insn = 1'b1;
 
@@ -725,7 +720,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     // The MASKU will ask for elements from vs2 through the MaskB opqueue
                     // and deshuffle them with eew_vd_op encoding
                     ara_req.eew_vd_op = eew_q[ara_req.vs2];
-                    // TODO: add vlut flag
+                    // Add vlut flag to req
                     ara_req.lut_mode = csr_vtype_q.vlut;
                   end
                   6'b010000: begin
