@@ -57,7 +57,6 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     // Parallel Perm interface with the Vector Register File
     input  elen_t            [NrVRFBanksPerLane-1:0] permu_operand_i,
     input  logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_i,
-    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_ready_o,
     output elen_t            [NrVRFBanksPerLane-1:0] permu_operand_o,
     output logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_o,
     input  logic             [NrVRFBanksPerLane-1:0] permu_operand_ready_i

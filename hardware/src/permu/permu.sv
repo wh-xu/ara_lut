@@ -1,10 +1,12 @@
 // This is a wrapper for the SimdPermutation module
-module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
+module permu import ara_pkg::*; import rvv_pkg::*; #(
     parameter int           NumLanes = 8,
     parameter int           NumBanksPerLane = 8,
     parameter int           NumSegments = 8,
     parameter int           NumRotationRadix = 4,
     parameter int           SizeXbar = 32,
+    parameter int           VLEN = 0,
+    parameter type          vaddr_t   = logic,  // Type used to address vector register file elements
     parameter type          pe_req_t  = logic,
     parameter type          pe_resp_t = logic,
     // DO NOT CHANGE!
@@ -29,13 +31,11 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
     output pe_resp_t                                   pe_resp_o,
 
     // Result interface
-   //  output logic     [NumLanes-1:0]                    permu_result_req_o,
-   //  output vid_t     [NumLanes-1:0]                    permu_result_id_o,
-   //  output vaddr_t   [NumLanes-1:0]                    permu_result_addr_o,
+    output logic     [NumLanes-1:0]                    permu_result_req_o,
+    output vid_t     [NumLanes-1:0]                    permu_result_id_o,
+    output vaddr_t   [NumLanes-1:0]                    permu_result_addr_o,
     output elen_t [NumLanes-1:0][NumBanksPerLane-1:0]  permu_result_wdata_o,
-   //  output strb_t    [NumLanes-1:0]                    permu_result_be_o,
-    input  logic     [NumLanes-1:0]                    permu_result_gnt_i,
-    input  logic     [NumLanes-1:0]                    permu_result_final_gnt_i
+    input  logic     [NumLanes-1:0]                    permu_result_gnt_i
   );
    import cf_math_pkg::idx_width;
 
@@ -97,9 +97,8 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
    pe_resp_t pe_resp_d;
 
    // Permutation control
-   logic selIdxVal, permute_i, result_ready_i;
+   logic selIdxVal, permute_i, result_ready_i, result_valid_o;
    vlut_e lut_mode_i;
-   logic result_valid_o;
    
    assign selIdxVal = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt][0];
    assign permute_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == 2'd2;
@@ -107,11 +106,66 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
    assign lut_mode_i = vinsn_issue.lut_mode - 1'b1;
 
 
+   // Deshuffled and transposed input for sequential access
+   logic [ELEN*NumLanes-1:0] operand_i_deshuffled_flat [NumBanksPerLane-1:0];
+   elen_t [NumBanksPerLane-1:0][NumLanes-1:0] operand_i_deshuffled;
+
+   // Shuffled output for sequential access
+   elen_t [NumBanksPerLane-1:0][NumLanes-1:0] result_o_deshuffled;
+   logic [ELEN*NumLanes-1:0] result_o_shuffled_flat [NumBanksPerLane-1:0];
+   elen_t [NumLanes-1:0][NumBanksPerLane-1:0]  result_o_shuffled_tmp;
+
+
+   /////////////////////
+   //  Result queues  //
+   /////////////////////
+
+   localparam int unsigned ResultQueueDepth = 2;
+
+   // There is a result queue per lane, holding the results that were not
+   // yet accepted by the corresponding lane.
+   typedef struct packed {
+     vid_t id;
+     vaddr_t addr;
+     elen_t [NumBanksPerLane-1:0] wdata;
+   } payload_t;
+
+   // Result queue
+   payload_t [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_d, result_queue_q;
+   logic     [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_valid_d, result_queue_valid_q;
+   // We need two pointers in the result queue. One pointer to
+   // indicate with `payload_t` we are currently writing into (write_pnt),
+   // and one pointer to indicate which `payload_t` we are currently
+   // reading from and writing into the lanes (read_pnt).
+   // logic     [idx_width(ResultQueueDepth)-1:0]   result_queue_write_pnt_d, result_queue_write_pnt_q;
+   // logic     [idx_width(ResultQueueDepth)-1:0]   result_queue_read_pnt_d, result_queue_read_pnt_q;
+
+   // We need to count how many valid elements (payload_t) are there in this result queue.
+   logic     [idx_width(ResultQueueDepth):0]     result_queue_cnt_d, result_queue_cnt_q;
+   // Vector to register the final grants from the operand requesters, which indicate
+   // that the result was actually written in the VRF (while the normal grant just says
+   // that the result was accepted by the operand requester stage
+   logic     [NumLanes-1:0]                       result_final_gnt_d, result_final_gnt_q;
+
+   // Is the result queue full?
+   logic result_queue_full;
+   assign result_queue_full = (result_queue_cnt_q == ResultQueueDepth);
+   // Is the result queue empty?
+   logic result_queue_empty;
+   assign result_queue_empty = (result_queue_cnt_q == '0);
+
+
    always_comb begin
-         
       // Maintain state
       vinsn_queue_d    = vinsn_queue_q;
       vinsn_running_d  = vinsn_running_q & pe_vinsn_running_i;
+
+      result_queue_d           = result_queue_q;
+      result_queue_valid_d     = result_queue_valid_q;
+      // result_queue_write_pnt_d = result_queue_write_pnt_q;
+      result_queue_cnt_d       = result_queue_cnt_q;
+
+      result_final_gnt_d = result_final_gnt_q;
 
       // Set the response to default
       pe_resp_d = '0;
@@ -134,6 +188,18 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
 
             // Reset the operand counter
             vinsn_queue_d.cnt_oprand[vinsn_queue_q.issue_pnt] = '0;
+
+            // Write to the result queue
+            for (int unsigned lane = 0; lane < NumLanes; lane++) begin 
+               result_queue_valid_d[0][lane] = 1'b1;
+               result_queue_d[0][lane].id    = vinsn_issue.id;
+               result_queue_d[0][lane].addr  = vaddr(vinsn_issue.vd, NumLanes, VLEN) >> $clog2(NumBanksPerLane);
+               result_queue_d[0][lane].wdata = result_o_shuffled_tmp[lane];
+            end
+
+            `ifdef DEBUG
+            $display("permu_vd = %d, addr = %d", vinsn_issue.vd, result_queue_d[0][0].addr);
+            `endif
          end
 
          if(operand_ready_o && operand_valid_i) begin
@@ -145,89 +211,31 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
          `endif
       end
 
-
-   // if (out_vrf_word_valid) begin
-   //    // Write to the lanes
-   //    result_queue_valid_d[result_queue_write_pnt_q] = {NrLanes{1'b1}};
-
-   //    // Increment result queue pointers and counters
-   //    result_queue_cnt_d += 1;
-   //    result_queue_write_pnt_d = result_queue_write_pnt_q + 1;
-   //    if (result_queue_write_pnt_q == ResultQueueDepth-1) begin
-   //       result_queue_write_pnt_d = '0;
-   //    end
-
-   //    // Account for the written results
-   //    // VIOTA and VID do not write bits!
-   //    processing_cnt_d = vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VRGATHEREI16]} ? processing_cnt_q - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew) : processing_cnt_q - NrLanes * DataWidth;
-   //    // Account for the written results by VCOMPRESS
-   //    if (vinsn_issue.op == VCOMPRESS) begin
-   //       vcompress_cnt_d = vcompress_cnt_d - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew);
-   //    end
-   // end
-
-
       //////////////
       //  Commit  //
       //////////////
 
-   //    for (int lane = 0; lane < NrLanes; lane++) begin: result_write
-   //       masku_result_req_o[lane]   = result_queue_valid_q[result_queue_read_pnt_q][lane];
-   //       masku_result_addr_o[lane]  = result_queue_q[result_queue_read_pnt_q][lane].addr;
-   //       masku_result_id_o[lane]    = result_queue_q[result_queue_read_pnt_q][lane].id;
-   //       masku_result_wdata_o[lane] = result_queue_q[result_queue_read_pnt_q][lane].wdata;
-   //       masku_result_be_o[lane]    = result_queue_q[result_queue_read_pnt_q][lane].be;
+      for (int unsigned lane = 0; lane < NumLanes; lane++) begin: result_write
+         permu_result_req_o[lane]   = result_queue_valid_q[0][lane];
+         permu_result_id_o[lane]    = result_queue_q[0][lane].id;
+         permu_result_addr_o[lane]  = result_queue_q[0][lane].addr;
+         permu_result_wdata_o[lane] = result_queue_q[0][lane].wdata;
 
-   //       // Update the final gnt vector
-   //       result_final_gnt_d[lane] |= masku_result_final_gnt_i[lane];
+         // Update the final gnt vector
+         // result_final_gnt_d[lane] |= permu_result_final_gnt_i[lane];
 
-   //       // Received a grant from the VRF.
-   //       // Deactivate the request, but do not bump the pointers for now.
-   //       if (masku_result_req_o[lane] && masku_result_gnt_i[lane]) begin
-   //       result_queue_valid_d[result_queue_read_pnt_q][lane] = 1'b0;
-   //       result_queue_d[result_queue_read_pnt_q][lane]       = '0;
-   //       // Reset the final gnt vector since we are now waiting for another final gnt
-   //       result_final_gnt_d[lane] = 1'b0;
-   //       end
-   //    end: result_write
-
-   //    // All lanes accepted the VRF request
-   //    if (!(|result_queue_valid_d[result_queue_read_pnt_q]) &&
-   //       (&result_final_gnt_d || (commit_cnt_q > (NrLanes * DataWidth)))) begin
-   //       // There is something waiting to be written
-   //       if (!result_queue_empty) begin
-   //       // Increment the read pointer
-   //       if (result_queue_read_pnt_q == ResultQueueDepth-1)
-   //          result_queue_read_pnt_d = 0;
-   //       else
-   //          result_queue_read_pnt_d = result_queue_read_pnt_q + 1;
-
-   //       // Decrement the counter of results waiting to be written
-   //       result_queue_cnt_d -= 1;
-
-   //       // Reset the queue
-   //       result_queue_d[result_queue_read_pnt_q] = '0;
-
-   //       // Decrement the counter of remaining vector elements waiting to be written
-   //       if (!(vinsn_commit.op inside {VSE})) begin
-   //          if (vinsn_commit.op inside {[VIOTA:VID],[VRGATHER:VCOMPRESS]}) begin
-   //             commit_cnt_d = commit_cnt_q - ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew));
-   //             if (commit_cnt_q < ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew)))
-   //             commit_cnt_d = '0;
-   //          end else begin
-   //             commit_cnt_d = commit_cnt_q - NrLanes * DataWidth;
-   //             if (commit_cnt_q < (NrLanes * DataWidth))
-   //             commit_cnt_d = '0;
-   //          end
-   //       end
-   //       end
-   //    end
+      end: result_write
 
 
       // Finished committing the results of a vector instruction
       if (vinsn_commit_valid) begin
-         // PERMU result is valid and ready to be written to the output
-         if(result_valid_o && result_ready_i) begin
+         // Received a grant from the VRF.
+         // Deactivate the request, but do not bump the pointers for now.
+         if (&permu_result_req_o && &permu_result_gnt_i) begin
+            // Reset the queue
+            result_queue_d[0]       = '0;
+            result_queue_valid_d[0] = '0;
+
             // Mark the vector instruction as being done
             pe_resp_d.vinsn_done[vinsn_commit.id] = 1'b1;
 
@@ -245,6 +253,23 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
             $display("[permu_commit] result_valid_o=%d, result_ready_i=%d", result_valid_o, result_ready_i);
             `endif
          end
+
+         // PERMU result is valid and ready to be written to the output
+         // if(result_valid_o && result_ready_i) begin
+         //    // Mark the vector instruction as being done
+         //    pe_resp_d.vinsn_done[vinsn_commit.id] = 1'b1;
+
+         //    // Update the commit counters and pointers
+         //    vinsn_queue_d.commit_cnt -= 1;
+         //    if (vinsn_queue_q.commit_pnt == VInsnQueueDepth-1)
+         //       vinsn_queue_d.commit_pnt = '0;
+         //    else
+         //       vinsn_queue_d.commit_pnt += 1;
+
+         //    // Reset the operand counter
+         //    vinsn_queue_d.cnt_oprand[vinsn_queue_q.commit_pnt] = '0;
+
+         // end
       end
 
 
@@ -279,21 +304,23 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
          vinsn_running_q         <= '0;
          vinsn_queue_q           <= '0;
          pe_resp_o               <= '0;
+
+         result_queue_q          <= '0;
+         result_queue_valid_q    <= '0;
+         result_queue_cnt_q      <= '0;
+         result_final_gnt_q      <= '0;
       end else begin
          vinsn_running_q         <= vinsn_running_d;
          vinsn_queue_q           <= vinsn_queue_d;
          pe_resp_o               <= pe_resp_d;
+
+         result_queue_q          <= result_queue_d;
+         result_queue_valid_q    <= result_queue_valid_d;
+         result_queue_cnt_q      <= result_queue_cnt_d;
+         result_final_gnt_q      <= result_final_gnt_d;
       end
    end
 
-
-   // Deshuffled and transposed input for sequential access
-   logic [ELEN*NumLanes-1:0] operand_i_deshuffled_flat [NumBanksPerLane-1:0];
-   elen_t [NumBanksPerLane-1:0][NumLanes-1:0] operand_i_deshuffled;
-
-   // Shuffled output for sequential access
-   logic [ELEN*NumLanes-1:0] result_o_deshuffled_flat [NumBanksPerLane-1:0];
-   elen_t [NumBanksPerLane-1:0][NumLanes-1:0] result_o_deshuffled;
 
    always_comb begin
       // Deshuffle the input operand before sending it to the permutation network
@@ -314,10 +341,10 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
             automatic int shuffle_idx = shuffle_index(b, NumLanes, EW16);
             automatic int lane_idx    = b / ELENB; // rounded down to nearest integer
             automatic int lane_offset = b % ELENB;
-            result_o_deshuffled_flat[bank][8*shuffle_idx +: 8] = result_o_deshuffled[bank][lane_idx][8*lane_offset +: 8];
+            result_o_shuffled_flat[bank][8*shuffle_idx +: 8] = result_o_deshuffled[bank][lane_idx][8*lane_offset +: 8];
          end
          for(int lane=0; lane<NumLanes; lane++) begin
-            permu_result_wdata_o[lane][bank] = result_o_deshuffled_flat[bank][ELEN*lane +: ELEN];
+            result_o_shuffled_tmp[lane][bank] = result_o_shuffled_flat[bank][ELEN*lane +: ELEN];
          end
       end
    end
@@ -347,14 +374,16 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
       if(result_valid_o) begin
          $display("[permu_deshuffled_result_o] ");
          for(int bank=0; bank<NumBanksPerLane; bank++) begin
-            $display("[bank=%d] ", bank);
+            $write("[bank=%d] ", bank);
             for(int lane=0; lane<NumLanes; lane++) begin
                $write("%h ", result_o_deshuffled[bank][lane]);
             end
             $display("");
          end
+      end
 
-         $display("[permu_shuffled_result_i] ");
+      if(&permu_result_req_o) begin
+         $display("[permu_shuffled_result_o] ");
          for(int bank=0; bank<NumBanksPerLane; bank++) begin
             $write("[bank=%d] ", bank);
             for(int lane=0; lane<NumLanes; lane++) begin
@@ -374,10 +403,12 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
     .clock(clk_i),
     .reset(~rst_ni),
 
-    .io_inValid(operand_valid_i),
-    .io_inReady(operand_ready_o),
+    .io_permute(permute_i),
+    .io_mode(lut_mode_i), 
     .io_selIdxVal(selIdxVal),
 
+    .io_inValid(operand_valid_i),
+    .io_inReady(operand_ready_o),
     .io_inData_0_0(operand_i_deshuffled[0][0]),
     .io_inData_0_1(operand_i_deshuffled[0][1]),
     .io_inData_0_2(operand_i_deshuffled[0][2]),
@@ -442,12 +473,8 @@ module SimdPermWrapper import ara_pkg::*; import rvv_pkg::*; #(
     .io_inData_7_5(operand_i_deshuffled[7][5]),
     .io_inData_7_6(operand_i_deshuffled[7][6]),
     .io_inData_7_7(operand_i_deshuffled[7][7]),
-
-    .io_permute(permute_i),
-    .io_mode(lut_mode_i), 
     .io_outValid(result_valid_o), 
     .io_outReady(result_ready_i), 
-
     .io_outData_0_0(result_o_deshuffled[0][0]),
     .io_outData_0_1(result_o_deshuffled[0][1]),
     .io_outData_0_2(result_o_deshuffled[0][2]),

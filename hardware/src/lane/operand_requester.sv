@@ -81,15 +81,13 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  elen_t                                      ldu_result_wdata_i,
     input  strb_t                                      ldu_result_be_i,
     output logic                                       ldu_result_gnt_o,
-    output logic                                       ldu_result_final_gnt_o,
+    output logic                                       ldu_result_final_gnt_o
     // Permutation unit
-    input  logic                                       permu_result_req_i,
-    input  vid_t                                       permu_result_id_i,
-    input  vaddr_t                                     permu_result_addr_i,
-    input  elen_t                                      permu_result_wdata_i,
-    input  strb_t                                      permu_result_be_i,
-    output logic                                       permu_result_gnt_o,
-    output logic                                       permu_result_final_gnt_o
+    // input  logic                                       permu_result_req_i,
+    // input  vid_t                                       permu_result_id_i,
+    // input  vaddr_t                                     permu_result_addr_i,
+    // input  elen_t [NrVRFBanksPerLane-1:0]              permu_result_wdata_i,
+    // output logic                                       permu_result_gnt_o
   );
 
   import cf_math_pkg::idx_width;
@@ -166,24 +164,29 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   );
 
   // Permutation unit
-  vid_t   permu_result_id;
-  vaddr_t permu_result_addr;
-  elen_t  permu_result_wdata;
-  strb_t  permu_result_be;
-  logic   permu_result_req;
-  logic   permu_result_gnt;
-  stream_register #(.T(stream_register_payload_t)) i_permu_stream_register (
-    .clk_i     (clk_i                                                                            ),
-    .rst_ni    (rst_ni                                                                           ),
-    .clr_i     (1'b0                                                                             ),
-    .testmode_i(1'b0                                                                             ),
-    .data_i    ({permu_result_id_i, permu_result_addr_i, permu_result_wdata_i, permu_result_be_i}),
-    .valid_i   (permu_result_req_i                                                               ),
-    .ready_o   (permu_result_gnt_o                                                               ),
-    .data_o    ({permu_result_id, permu_result_addr, permu_result_wdata, permu_result_be}        ),
-    .valid_o   (permu_result_req                                                                 ),
-    .ready_i   (permu_result_gnt                                                                 )
-  );
+  // typedef struct packed {
+  //   vid_t id;
+  //   vaddr_t addr;
+  //   elen_t [NrVRFBanksPerLane-1:0] wdata;
+  // } permu_stream_register_payload_t;
+
+  // vid_t   permu_result_id;
+  // vaddr_t permu_result_addr;
+  // elen_t [NrVRFBanksPerLane-1:0] permu_result_wdata;
+  // logic   permu_result_req;
+  // logic   permu_result_gnt;
+  // stream_register #(.T(permu_stream_register_payload_t)) i_permu_stream_register (
+  //   .clk_i     (clk_i                                                                            ),
+  //   .rst_ni    (rst_ni                                                                           ),
+  //   .clr_i     (1'b0                                                                             ),
+  //   .testmode_i(1'b0                                                                             ),
+  //   .data_i    ({permu_result_id_i, permu_result_addr_i, permu_result_wdata_i}),
+  //   .valid_i   (permu_result_req_i                                                               ),
+  //   .ready_o   (permu_result_gnt_o                                                               ),
+  //   .data_o    ({permu_result_id, permu_result_addr, permu_result_wdata}        ),
+  //   .valid_o   (permu_result_req                                                                 ),
+  //   .ready_i   (permu_result_gnt                                                                 )
+  // );
 
 
   // The very last grant must happen when the instruction actually write in the VRF
@@ -193,12 +196,10 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       ldu_result_final_gnt_o   <= 1'b0;
       sldu_result_final_gnt_o  <= 1'b0;
       masku_result_final_gnt_o <= 1'b0;
-      permu_result_final_gnt_o <= 1'b0;
     end else begin
       ldu_result_final_gnt_o   <= ldu_result_gnt;
       sldu_result_final_gnt_o  <= sldu_result_gnt;
       masku_result_final_gnt_o <= masku_result_gnt;
-      permu_result_final_gnt_o <= permu_result_gnt;
     end
   end
 
@@ -226,7 +227,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
       vinsn_result_written_d[ldu_result_id] |= ldu_result_gnt;
       vinsn_result_written_d[sldu_result_id] |= sldu_result_gnt;
-      vinsn_result_written_d[permu_result_id] |= permu_result_gnt;
+      // vinsn_result_written_d[permu_result_id] |= permu_result_gnt;
     end
   end
 
@@ -613,26 +614,22 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       default: '0
     };
     // TODO: add perm unit
-    operand_payload[NrOperandQueues + VFU_PermUnit] = '{
-      addr   : ldu_result_addr >> $clog2(NrBanks),
-      wen    : 1'b1,
-      wdata  : ldu_result_wdata,
-      be     : ldu_result_be,
-      opqueue: AluA,
-      default: '0
-    };
+    // operand_payload[NrOperandQueues + VFU_PermUnit] = '{
+    //   addr   : permu_result_addr >> $clog2(NrBanks),
+    //   wen    : 1'b1,
+    //   wdata  : permu_result_wdata,
+    //   be     : permu_result_be,
+    //   opqueue: AluA,
+    //   default: '0
+    // };
 
     // Store their request value
-    ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] =
-    alu_result_req_i;
-    ext_operand_req[mfpu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_MFpu] =
-    mfpu_result_req_i;
-    ext_operand_req[masku_result_addr[idx_width(NrBanks)-1:0]][VFU_MaskUnit] =
-    masku_result_req;
-    ext_operand_req[sldu_result_addr[idx_width(NrBanks)-1:0]][VFU_SlideUnit] =
-    sldu_result_req;
-    ext_operand_req[ldu_result_addr[idx_width(NrBanks)-1:0]][VFU_LoadUnit] =
-    ldu_result_req;
+    ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] = alu_result_req_i;
+    ext_operand_req[mfpu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_MFpu] = mfpu_result_req_i;
+    ext_operand_req[masku_result_addr[idx_width(NrBanks)-1:0]][VFU_MaskUnit] = masku_result_req;
+    ext_operand_req[sldu_result_addr[idx_width(NrBanks)-1:0]][VFU_SlideUnit] = sldu_result_req;
+    ext_operand_req[ldu_result_addr[idx_width(NrBanks)-1:0]][VFU_LoadUnit] = ldu_result_req;
+    // ext_operand_req[permu_result_addr[idx_width(NrBanks)-1:0]][VFU_PermUnit] = permu_result_req;
 
     // Generate the grant signals
     alu_result_gnt_o  = 1'b0;

@@ -42,7 +42,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     // Dependant parameters. DO NOT CHANGE!
     // Ara has NrLanes + 3 processing elements: each one of the lanes, the vector load unit, the
     // vector store unit, the slide unit, and the mask unit.
-    localparam int           unsigned NrPEs        = NrLanes + 4,
+    localparam int           unsigned NrPEs        = NrLanes + 4 + 1, // +1 for the parallel permutation unit
     localparam type                   vlen_t       = logic[$clog2(VLEN+1)-1:0],
     localparam int           unsigned VLENB        = VLEN / 8
   ) (
@@ -389,9 +389,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   vid_t     [NrLanes-1:0]                      permu_result_id;
   vaddr_t   [NrLanes-1:0]                      permu_result_addr;
   elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_result_wdata;
-  strb_t    [NrLanes-1:0]                      permu_result_be;
   logic     [NrLanes-1:0]                      permu_result_gnt;
-  logic     [NrLanes-1:0]                      permu_result_final_gnt;
 
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin: gen_lanes
@@ -484,9 +482,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
       .permu_result_id_i               (permu_result_id[lane]               ),
       .permu_result_addr_i             (permu_result_addr[lane]             ),
       .permu_result_wdata_i            (permu_result_wdata[lane]            ),
-      .permu_result_be_i               (permu_result_be[lane]               ),
-      .permu_result_gnt_o              (permu_result_gnt[lane]              ),
-      .permu_result_final_gnt_o        (permu_result_final_gnt[lane]        )
+      .permu_result_gnt_o              (permu_result_gnt[lane]              )
     );
   end: gen_lanes
 
@@ -506,12 +502,14 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   logic permu_result_valid_o;
 
 
-  SimdPermWrapper #(
+  permu #(
     .NumLanes(NrLanes),
     .NumBanksPerLane(NrVRFBanksPerLane),
     .NumSegments(NrVRFBanksPerLane),
     .NumRotationRadix(4),
     .SizeXbar(32),
+    .VLEN(VLEN),
+    .vaddr_t(vaddr_t),
     .pe_req_t(pe_req_t),
     .pe_resp_t(pe_resp_t)
   ) i_simd_perm (
@@ -528,15 +526,12 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .pe_req_ready_o           (pe_req_ready[NrLanes+OffsetPerm] ),
     .pe_resp_o                (pe_resp[NrLanes+OffsetPerm]      ),
     // Interface with the lanes
-    // .permu_result_req_o       (permu_result_req                 ),
-    // .permu_result_id_o        (permu_result_id                  ),
-    // .permu_result_addr_o      (permu_result_addr                ),
+    .permu_result_req_o       (permu_result_req                 ),
+    .permu_result_id_o        (permu_result_id                  ),
+    .permu_result_addr_o      (permu_result_addr                ),
     .permu_result_wdata_o     (permu_result_wdata               ),
-    // .permu_result_be_o        (permu_result_be                  ),
-    .permu_result_gnt_i       (permu_result_gnt                 ),
-    .permu_result_final_gnt_i (permu_result_final_gnt           )
+    .permu_result_gnt_i       (permu_result_gnt                 )
   );
-
 
   assign permu_operand_valid_i = &permu_operand_valid_lane_o;
   assign permu_operand_ready_lane_i = {(NrVRFBanksPerLane*NrLanes){permu_operand_ready_o}};

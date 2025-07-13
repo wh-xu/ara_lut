@@ -32,8 +32,8 @@ sources:
     # Sources
     # Level 0
     - hardware/src/segment_sequencer.sv
-    - hardware/src/perm/SimdPermWrapper.sv
-    - hardware/src/perm/SimdPermutation.sv
+    - hardware/src/permu/permu.sv
+    - hardware/src/permu/SimdPermutation.sv
     # Level 1
     - hardware/src/ctrl_registers.sv
     - hardware/src/cva6_accel_first_pass_decoder.sv
