@@ -61,6 +61,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     output logic                                           alu_vinsn_done_o,
     output logic                                           mfpu_vinsn_done_o,
     input  logic                [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_i,
+    input  logic                [NrVInsn-1:0]              permu_active_table_i,
     // Interface with the Store unit
     output elen_t                                          stu_operand_o,
     output logic                                           stu_operand_valid_o,
@@ -356,6 +357,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .rst_ni                   (rst_ni                  ),
     // Interface with the main sequencer
     .global_hazard_table_i    (global_hazard_table_i   ),
+    .permu_active_table_i     (permu_active_table_i    ),
     // Interface with the lane sequencer
     .operand_request_i        (operand_request         ),
     .operand_request_valid_i  (operand_request_valid   ),
@@ -453,19 +455,24 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   `ifdef DEBUG
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
-    if(&permu_operand_vrf_valid_o) begin
-      $display("[Lane]-%d permu_operand_o", lane_id_i);
-      for(int i=0; i<NrVRFBanksPerLane; i++) begin
-        $write("%h ", permu_operand_vrf_o[i]);
-      end
-      $display("");
-    end
+    // if(&permu_operand_vrf_valid_o) begin
+    //   $display("[Lane]-%d permu_operand_o", lane_id_i);
+    //   for(int i=0; i<NrVRFBanksPerLane; i++) begin
+    //     $write("%h ", permu_operand_vrf_o[i]);
+    //   end
+    //   $display("");
+    // end
 
-    for(int i=0; i<NrVRFBanksPerLane; i++) begin
-      // if(&vrf_req && i==0 && lane_id_i==0) begin
-      //   $display("[Lane] All-bank Fetch: addr=%h, be=%h, wdata=%h", vrf_addr[i], vrf_be[i], vrf_wdata[i]);
-      // end
-    end
+    // for(int i=0; i<NrVRFBanksPerLane; i++) begin
+    //   if(vrf_req[i] && vrf_wen[i]) begin
+    //     $display("[VRF]lane-%d write to vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
+    //   end
+
+    //   if(vrf_req[i] && !vrf_wen[i]) begin
+    //     $display("[VRF]lane-%d read from vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
+    //   end
+    // end
+
   end
   `endif
 

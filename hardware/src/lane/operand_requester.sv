@@ -23,6 +23,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                                       rst_ni,
     // Interface with the main sequencer
     input  logic            [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_i,
+    input  logic            [NrVInsn-1:0]              permu_active_table_i,
     // Interface with the lane sequencer
     input  operand_request_cmd_t [NrOperandQueues-1:0] operand_request_i,
     input  logic                 [NrOperandQueues-1:0] operand_request_valid_i,
@@ -80,7 +81,15 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  elen_t                                      ldu_result_wdata_i,
     input  strb_t                                      ldu_result_be_i,
     output logic                                       ldu_result_gnt_o,
-    output logic                                       ldu_result_final_gnt_o
+    output logic                                       ldu_result_final_gnt_o,
+    // Permutation unit
+    input  logic                                       permu_result_req_i,
+    input  vid_t                                       permu_result_id_i,
+    input  vaddr_t                                     permu_result_addr_i,
+    input  elen_t                                      permu_result_wdata_i,
+    input  strb_t                                      permu_result_be_i,
+    output logic                                       permu_result_gnt_o,
+    output logic                                       permu_result_final_gnt_o
   );
 
   import cf_math_pkg::idx_width;
@@ -156,6 +165,27 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     .ready_i   (masku_result_gnt                                                                 )
   );
 
+  // Permutation unit
+  vid_t   permu_result_id;
+  vaddr_t permu_result_addr;
+  elen_t  permu_result_wdata;
+  strb_t  permu_result_be;
+  logic   permu_result_req;
+  logic   permu_result_gnt;
+  stream_register #(.T(stream_register_payload_t)) i_permu_stream_register (
+    .clk_i     (clk_i                                                                            ),
+    .rst_ni    (rst_ni                                                                           ),
+    .clr_i     (1'b0                                                                             ),
+    .testmode_i(1'b0                                                                             ),
+    .data_i    ({permu_result_id_i, permu_result_addr_i, permu_result_wdata_i, permu_result_be_i}),
+    .valid_i   (permu_result_req_i                                                               ),
+    .ready_o   (permu_result_gnt_o                                                               ),
+    .data_o    ({permu_result_id, permu_result_addr, permu_result_wdata, permu_result_be}        ),
+    .valid_o   (permu_result_req                                                                 ),
+    .ready_i   (permu_result_gnt                                                                 )
+  );
+
+
   // The very last grant must happen when the instruction actually write in the VRF
   // Otherwise the dependency is freed in advance
   always_ff @(posedge clk_i or negedge rst_ni) begin : p_final_gnts
@@ -163,10 +193,12 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       ldu_result_final_gnt_o   <= 1'b0;
       sldu_result_final_gnt_o  <= 1'b0;
       masku_result_final_gnt_o <= 1'b0;
+      permu_result_final_gnt_o <= 1'b0;
     end else begin
       ldu_result_final_gnt_o   <= ldu_result_gnt;
       sldu_result_final_gnt_o  <= sldu_result_gnt;
       masku_result_final_gnt_o <= masku_result_gnt;
+      permu_result_final_gnt_o <= permu_result_gnt;
     end
   end
 
@@ -187,11 +219,15 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     vinsn_result_written_d = '0;
 
     // Which vector instructions are writing something?
-    vinsn_result_written_d[alu_result_id_i] |= alu_result_gnt_o;
-    vinsn_result_written_d[mfpu_result_id_i] |= mfpu_result_gnt_o;
-    vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
-    vinsn_result_written_d[ldu_result_id] |= ldu_result_gnt;
-    vinsn_result_written_d[sldu_result_id] |= sldu_result_gnt;
+    // TODO: this needs to be disabled when the PERMU is active
+    if(~(|permu_active_table_i)) begin
+      vinsn_result_written_d[alu_result_id_i] |= alu_result_gnt_o;
+      vinsn_result_written_d[mfpu_result_id_i] |= mfpu_result_gnt_o;
+      vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
+      vinsn_result_written_d[ldu_result_id] |= ldu_result_gnt;
+      vinsn_result_written_d[sldu_result_id] |= sldu_result_gnt;
+      vinsn_result_written_d[permu_result_id] |= permu_result_gnt;
+    end
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: p_vinsn_result_written_ff
@@ -218,7 +254,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   // A set bit indicates that the the master q is requesting access to the bank b
   // Masters 0 to NrOperandQueues-1 correspond to the operand queues.
   // The remaining four masters correspond to the ALU, the MFPU, the MASKU, the VLDU, and the SLDU.
-  localparam NrGlobalMasters = 5;
+  // The last master corresponds to the PERMU.
+  localparam NrGlobalMasters = 5+1;
   localparam NrMasters = NrOperandQueues + NrGlobalMasters;
 
   typedef struct packed {

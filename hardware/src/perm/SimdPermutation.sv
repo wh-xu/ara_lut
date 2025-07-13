@@ -3803,6 +3803,18 @@ module SimdPermutation(
   output [63:0] io_outData_7_6, // @[src/main/scala/simd_perm/simd_perm.scala 94:14]
   output [63:0] io_outData_7_7 // @[src/main/scala/simd_perm/simd_perm.scala 94:14]
 );
+`ifdef DEBUG
+always_ff @(posedge clock) begin
+  if(io_inValid && io_inReady) begin
+    $display("[simd_perm]: io_selIdxVal = %d, io_inReady = %d, io_inData_0_0 = %h", io_selIdxVal, io_inReady, io_inData_0_0);
+  end
+
+  if(io_permute) begin
+    $display("[simd_perm]: io_permute = %d, lut_mode = %d", io_permute, io_mode);
+  end
+end
+`endif
+
 `ifdef RANDOMIZE_REG_INIT
   reg [31:0] _RAND_0;
   reg [31:0] _RAND_1;

@@ -42,6 +42,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     input  logic                            mfpu_vinsn_done_i,
     // Interface with the operand requesters
     output logic [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_o,
+    // Indicate if the parallel permutation unit is active
+    output logic              [NrVInsn-1:0] permu_active_table_o,
     // Only the slide unit can answer with a scalar response
     input  elen_t                           pe_scalar_resp_i,
     input  logic                            pe_scalar_resp_valid_i,
@@ -83,6 +85,10 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     .cnt_o  (vinsn_id_n        ),
     .empty_o(vinsn_running_full)
   );
+
+  //
+  logic use_par_permu;
+  assign use_par_permu = ara_req_i.op == VRGATHEREI16 && ara_req_i.lut_mode > CBSEQ;
 
   always_comb begin: p_vinsn_running
     vinsn_running_d = '0;
@@ -142,6 +148,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   // This information is forwarded to the operand requesters of each lane
 
   logic [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_d;
+  logic [NrVInsn-1:0] permu_active_table_d;
 
   ////////////////////////
   // Start and End lane //
@@ -238,11 +245,11 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
   vreg_access_t [31:0] write_list_d, write_list_q;
 
   // This function determines the VFU responsible for handling this operation.
-  function automatic vfu_e vfu(ara_op_e op`ifndef SYNTHESIS = VADD `endif, vlut_e lut_mode);
+  function automatic vfu_e vfu(ara_op_e op`ifndef SYNTHESIS = VADD `endif);
     unique case (op) inside
       [VADD:VWREDSUM]      : vfu = VFU_Alu;
       [VMUL:VFWREDOSUM]    : vfu = VFU_MFpu;
-      [VMFEQ:VCOMPRESS]    : vfu = ((lut_mode > CBSEQ) && (op == VRGATHEREI16)) ? VFU_PermUnit : VFU_MaskUnit;
+      [VMFEQ:VCOMPRESS]    : vfu = VFU_MaskUnit;
       [VLE:VLXE]           : vfu = VFU_LoadUnit;
       [VSE:VSXE]           : vfu = VFU_StoreUnit;
       [VSLIDEUP:VSLIDEDOWN]: vfu = VFU_SlideUnit;
@@ -361,6 +368,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     read_list_d           = read_list_q;
     write_list_d          = write_list_q;
     global_hazard_table_d = global_hazard_table_o;
+    permu_active_table_d  = permu_active_table_o;
 
     // Maintain request
     pe_req_d       = '0;
@@ -384,6 +392,10 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
     // Update the running vector instructions
     for (int pe = 0; pe < NrPEs; pe++) pe_vinsn_running_d[pe] &= ~pe_resp_i[pe].vinsn_done;
+
+
+    // TODO: update the permu active table
+    // for (int id = 0; id < NrVInsn; id++) permu_active_table_d[id] &= vinsn_running_d;
 
     case (state_q)
       IDLE: begin
@@ -439,7 +451,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               op            : ara_req_i.op,
               vm            : ara_req_i.vm,
               eew_vmask     : ara_req_i.eew_vmask,
-              vfu           : vfu(ara_req_i.op, ara_req_i.lut_mode),
+              vfu           : use_par_permu ? VFU_PermUnit : vfu(ara_req_i.op),
               vs1           : ara_req_i.vs1,
               use_vs1       : ara_req_i.use_vs1,
               conversion_vs1: ara_req_i.conversion_vs1,
@@ -479,6 +491,11 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
             // Populate the global hazard table
             global_hazard_table_d[vinsn_id_n] = pe_req_d.hazard_vd  | pe_req_d.hazard_vm |
                                                 pe_req_d.hazard_vs1 | pe_req_d.hazard_vs2;
+            
+            // Update the permu active table
+            if (use_par_permu) begin
+              permu_active_table_d[vinsn_id_n] = 1'b1;
+            end
 
             // We only issue instructions that take no operands if they have no hazards.
             // Moreover, SLIDE instructions cannot be always chained
@@ -495,7 +512,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               ara_req_ready_o = 1'b1;
 
               // Remember that the vector instruction is running
-              unique case (vfu(ara_req_i.op, ara_req_i.lut_mode))
+              unique case (use_par_permu ? VFU_PermUnit : vfu(pe_req_d.op))
                 VFU_LoadUnit : pe_vinsn_running_d[NrLanes + OffsetLoad][vinsn_id_n]  = 1'b1;
                 VFU_StoreUnit: pe_vinsn_running_d[NrLanes + OffsetStore][vinsn_id_n] = 1'b1;
                 VFU_SlideUnit: pe_vinsn_running_d[NrLanes + OffsetSlide][vinsn_id_n] = 1'b1;
@@ -596,6 +613,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
       global_hazard_table_o <= '0;
 
+      permu_active_table_o <= '0;
+
       running_mask_insn_q <= 1'b0;
     end else begin
       state_q <= state_d;
@@ -610,6 +629,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
       gold_ticket_q   <= gold_ticket_d;
 
       global_hazard_table_o <= global_hazard_table_d;
+      permu_active_table_o <= permu_active_table_d;
 
       running_mask_insn_q <= running_mask_insn_d;
     end
@@ -659,7 +679,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
   // Masked instructions do use the mask unit as well
   always_comb begin
-    target_vfus_vec                = ((ara_req_i.op==VRGATHEREI16)&&(ara_req_i.lut_mode > CBSEQ)) ? VFU_PermUnit : target_vfus(ara_req_i.op);
+    target_vfus_vec                = use_par_permu ? VFU_PermUnit : target_vfus(ara_req_i.op);
     target_vfus_vec[VFU_MaskUnit] |= ~ara_req_i.vm;
   end
 

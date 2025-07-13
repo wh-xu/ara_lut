@@ -341,7 +341,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         vfu            : pe_req.vfu,
         use_vs1        : pe_req.use_vs1,
         // vrgather/vcompress request vs2 in a non-conventional way from MaskB, not ALU
-        use_vs2        : pe_req.use_vs2 && !(pe_req.op inside {[VRGATHER:VCOMPRESS]}),
+        // vs2 needs to be used when activating parallel permutation
+        use_vs2        : pe_req.vfu == VFU_PermUnit ? pe_req.use_vs2 : (pe_req.use_vs2 && !(pe_req.op inside {[VRGATHER:VCOMPRESS]})),
         use_vd_op      : pe_req.use_vd_op,
         scalar_op      : pe_req.scalar_op,
         use_scalar_op  : pe_req.use_scalar_op,
@@ -1013,7 +1014,6 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         vl         : 1,
         vstart     : masku_vrgat_req_q.idx,
         hazard     : '0,
-        // lut_mode   : pe_req.lut_mode,
         default    : '0
       };
       operand_request_push[MaskB] = masku_vrgat_req_ready_d;
