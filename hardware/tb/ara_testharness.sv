@@ -329,7 +329,7 @@ module ara_testharness #(
   initial begin
     // @(start_dump_event);
     $dumpfile(vcd_path);
-    $dumpvars(0, i_ara_soc.i_system.i_ara.i_masku);
+    $dumpvars(0, i_ara_soc.i_system.i_ara);
     $display("[TB - VCD] START DUMPING to %s\n", vcd_path);
     $dumpon;
 

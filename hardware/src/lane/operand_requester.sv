@@ -454,6 +454,11 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
               // `endif
             end else begin
               lane_operand_req_transposed[requester_index][bank] = !stall;
+              `ifdef DEBUG
+              // if(stall) begin
+                // $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
+              // end
+              `endif
             end
             operand_payload[requester_index]   = '{
               addr   : requester_metadata_q.addr >> $clog2(NrBanks),
@@ -718,6 +723,16 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .req_o (vrf_req_o[bank] ),
       .gnt_i (vrf_req_o[bank] ) // Acknowledge it directly
     );
+  
+
+  // `ifdef DEBUG
+  //   always_ff @(posedge clk_i) begin
+  //     if (vrf_req_o[bank]) begin
+  //       $display("[GENERIC OP REQ] bank=%d, vrf_addr_o=%h, wen=%h", bank, vrf_addr_o[bank], vrf_wen_o[bank]);
+  //     end
+  //   end
+  // `endif
+
   end : gen_vrf_arbiters
 
 endmodule : operand_requester

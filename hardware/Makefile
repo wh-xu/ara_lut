@@ -73,7 +73,7 @@ ifeq ($(ideal_dispatcher), 1)
 endif
 
 ifeq ($(vcd_dump), 1)
-  vcd_path    ?= ../vcd/$(app).vcd
+  vcd_path    ?= ../vcd/waveform.vcd
   bender_defs += --define VCD_DUMP=1 --define VCD_PATH=$(vcd_path)
   $(info, "[TB - VCD] VCD dump enabled for app: $(app)")
   $(info, "[TB - VCD] VCD path: $(vcd_path)")

@@ -322,7 +322,15 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   `ifdef DEBUG
   always_ff @(posedge clk_i) begin
     if(pe_req_valid) begin
-      $display("[ARA] pe_req: op=%h, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, lut_mode=%h", pe_req.op, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.lut_mode);
+      $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
+      
+      $display("[ARA] global_hazard_table");
+      for(int i=0; i<NrVInsn; i++) begin
+        for(int j=0; j<NrVInsn; j++) begin
+          $write("%h ", global_hazard_table[i][j]);
+        end
+        $display("");
+      end
     end
   end
   `endif

@@ -292,19 +292,15 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .masku_vrgat_req_i      (masku_vrgat_req_i       )
   );
 
-  // `ifdef DEBUG
-  // always @(posedge clk_i) begin
-  //   if(operand_request_valid[PermIdx] && operand_request_ready[PermIdx]) begin
-  //     $display("[LANE] Perm-idx-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
-  //     operand_request[PermIdx].vs, operand_request[PermIdx].scale_vl, operand_request[PermIdx].eew, operand_request[PermIdx].vl, operand_request[PermIdx].vtype, operand_request[PermIdx].vstart, operand_request[PermIdx].hazard, operand_request[PermIdx].target_fu, operand_request[PermIdx].lut_mode);
-  //   end
-
-  //   if(operand_request_valid[PermVal] && operand_request_ready[PermVal]) begin
-  //     $display("[LANE] Perm-val-operand_request_o: vs=%d, scale_vl=%d, eew=%d, vl=%d, vtype=%h, vstart=%d, hazard=%h, target_fu=%h, lut_mode=%h", 
-  //     operand_request[PermVal].vs, operand_request[PermVal].scale_vl, operand_request[PermVal].eew, operand_request[PermVal].vl, operand_request[PermVal].vtype, operand_request[PermVal].vstart, operand_request[PermVal].hazard, operand_request[PermVal].target_fu, operand_request[PermVal].lut_mode);
-  //    end
-  // end
-  // `endif
+  `ifdef DEBUG
+  always @(posedge clk_i) begin
+    for(int i=0; i<NrOperandQueues; i++) begin
+      if(operand_request_valid[i] && operand_request_ready[i]) begin
+        $display("[LANE] queue-%d operand_request: id=%d, vs=%d, hazard=%b", i, operand_request[i].id, operand_request[i].vs, operand_request[i].hazard);
+      end
+    end
+  end
+  `endif
 
   /////////////////////////
   //  Operand Requester  //
@@ -524,25 +520,25 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
     if(&permu_operand_vrf_valid_o) begin
-      $display("[Lane]-%d permu_operand_o", lane_id_i);
-      for(int i=0; i<NrVRFBanksPerLane; i++) begin
+      $display("[VRF]lane-%d permu_operand read", lane_id_i);
+      for(int i=0; i<NrVRFBanksPerLane/2; i++) begin
         $write("%h ", permu_operand_vrf_o[i]);
       end
       $display("");
-    end else if (&vrf_req) begin
-       $display("[Lane]-%d permu_operand wen=%h", lane_id_i, vrf_wen);
-      for(int i=0; i<NrVRFBanksPerLane; i++) begin
+    end else if (&vrf_req && &vrf_wen) begin
+       $display("[VRF]lane-%d permu_operand write", lane_id_i);
+      for(int i=0; i<NrVRFBanksPerLane/2; i++) begin
         $write("%h ", vrf_wdata[i]);
       end
       $display("");
-    end else begin
+    end else if (|vrf_req && !(&vrf_req)) begin
       for(int i=0; i<NrVRFBanksPerLane; i++) begin
         if(vrf_req[i] && vrf_wen[i]) begin
-          $display("[VRF]lane-%d write to vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
+          $display("[VRF]lane-%d generic write to vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
         end
 
         if(vrf_req[i] && !vrf_wen[i]) begin
-          $display("[VRF]lane-%d read from vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
+          $display("[VRF]lane-%d generic read from vrf_addr=%h @ bank-%d", lane_id_i, vrf_addr[i], i);
         end
       end
     end

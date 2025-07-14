@@ -311,8 +311,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     SlduInsnQueueDepth,
     MaskuInsnQueueDepth,
     VlduInsnQueueDepth,
-    VstuInsnQueueDepth,
     PermuInsnQueueDepth,
+    VstuInsnQueueDepth,
     NoneInsnQueueDepth
   };
 
@@ -393,9 +393,8 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
     // Update the running vector instructions
     for (int pe = 0; pe < NrPEs; pe++) pe_vinsn_running_d[pe] &= ~pe_resp_i[pe].vinsn_done;
 
-
     // TODO: update the permu active table
-    // for (int id = 0; id < NrVInsn; id++) permu_active_table_d[id] &= vinsn_running_d;
+    permu_active_table_d &= ~pe_resp_i[NrLanes + OffsetPerm].vinsn_done;
 
     case (state_q)
       IDLE: begin
@@ -679,8 +678,13 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
 
   // Masked instructions do use the mask unit as well
   always_comb begin
-    target_vfus_vec                = use_par_permu ? VFU_PermUnit : target_vfus(ara_req_i.op);
-    target_vfus_vec[VFU_MaskUnit] |= ~ara_req_i.vm;
+    if(use_par_permu) begin
+      target_vfus_vec = '0;
+      target_vfus_vec[VFU_PermUnit] = 1'b1;
+    end else begin
+      target_vfus_vec                = target_vfus(ara_req_i.op);
+      target_vfus_vec[VFU_MaskUnit] |= ~ara_req_i.vm;
+    end
   end
 
   // One counter per VFU
