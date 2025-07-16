@@ -253,6 +253,8 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   assign pe_req    = pe_req_i;
   assign pe_resp_o = pe_resp;
 
+  hist_tag_t [31:0] lut_operand_table;
+
   lane_sequencer #(
     .NrLanes              (NrLanes              ),
     .pe_req_t             (pe_req_t             ),
@@ -269,6 +271,8 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .pe_vinsn_running_i     (pe_vinsn_running_i   ),
     .pe_req_ready_o         (pe_req_ready_o       ),
     .pe_resp_o              (pe_resp              ),
+    //
+    .lut_operand_table_i    (lut_operand_tag_table),
     // Support for store exception flush
     .lsu_ex_flush_i         (lsu_ex_flush_i       ),
     .lsu_ex_flush_o         (lsu_ex_flush_op_req_d),
@@ -455,6 +459,41 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .operand_permu_valid_o    (permu_operand_vrf_valid  ),
     .operand_permu_opqueue_o  (permu_operand_vrf_opqueue)
   );
+
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  // A tag table to track if each operand is changed between two consecutive LUT requests
+  // This is used to support reuse of the val operand
+  hist_tag_t [31:0] lut_operand_changed_table_d;
+  hist_tag_t [31:0] lut_operand_changed_table_q;
+  hist_tag_t [31:0] lut_operand_tag_table;
+
+
+  always_comb begin
+    lut_operand_tag_table = lut_operand_changed_table_q;
+
+    lut_operand_changed_table_d = lut_operand_changed_table_q;
+
+    // Update the tag for the operand that is being written to
+    // Currently we only check the first bank
+    // TODO: check all banks
+    if (vrf_wen[0]) begin
+      lut_operand_changed_table_d[vrf_addr[0]] = lut_operand_changed_table_q[vrf_addr[0]] + 1'b1;
+      `ifdef DEBUG
+        $display("[OP REQ] lut_operand_changed_table_d[%d] = %d", vrf_addr[0], lut_operand_changed_table_d[vrf_addr[0]]);
+      `endif
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      lut_operand_changed_table_q <= '0;
+    end else begin
+      lut_operand_changed_table_q <= lut_operand_changed_table_d;
+    end
+  end
+  //////////////////////////////////////////////////////////////////////////////////////////
+
 
   /////////////////////////////////////////
   // Add a last-level arbiter for PERMU  //

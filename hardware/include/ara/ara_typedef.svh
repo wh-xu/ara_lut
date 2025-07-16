@@ -83,6 +83,7 @@ typedef struct packed {
 
   // Lookup table configs
   rvv_pkg::vlut_e lut_mode;
+  rvv_pkg::vreuse_e lut_reuse;
 } pe_req_t;
 
 typedef struct packed {

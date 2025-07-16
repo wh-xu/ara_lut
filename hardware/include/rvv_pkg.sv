@@ -49,9 +49,19 @@ package rvv_pkg;
     CB256 = 3'b101
   } vlut_e;
 
+  // LUT oprand reuse
+  typedef enum logic {
+    VREUSE_OFF = 1'b0,
+    VREUSE_ON  = 1'b1
+  } vreuse_e;
+
+  // History tag
+  typedef logic [3:0] hist_tag_t;
+
   // Vector type register
   typedef struct packed {
     logic vill;
+    vreuse_e vreuse;
     vlut_e vlut;
     logic vma;
     logic vta;

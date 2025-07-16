@@ -99,14 +99,17 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
    // Permutation control
    logic selIdxVal, permute_i, result_ready_i, result_valid_o;
-   vlut_e lut_mode_i;
    
-   // assign selIdxVal = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt][0];
    assign selIdxVal = sel_idx_val_i;
-   assign permute_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == 2'd2;
-   // assign result_ready_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == 2'd2;
+   // assign selIdxVal = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt][0];
+
+   vlut_e lut_mode_i;
    assign lut_mode_i = vinsn_issue.lut_mode - 1'b1;
 
+   vreuse_e lut_reuse_i;
+   assign lut_reuse_i = vinsn_issue.lut_reuse;
+
+   assign permute_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == (lut_reuse_i==VREUSE_ON ? 2'd1 : 2'd2);
 
    // Deshuffled and transposed input for sequential access
    logic [ELEN*NumLanes-1:0] operand_i_deshuffled_flat [NumBanksPerLane-1:0];

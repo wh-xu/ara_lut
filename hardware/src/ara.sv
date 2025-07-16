@@ -160,6 +160,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
 
     // Config bits for lookup table (LUT) mode
     rvv_pkg::vlut_e lut_mode;
+    rvv_pkg::vreuse_e lut_reuse;
   } ara_req_t;
 
   typedef struct packed {

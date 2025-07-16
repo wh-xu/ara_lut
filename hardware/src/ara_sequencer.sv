@@ -484,6 +484,7 @@ module ara_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::i
               hazard_vs1    : pe_req_d.hazard_vs1,
               hazard_vs2    : pe_req_d.hazard_vs2,
               lut_mode      : ara_req_i.lut_mode,
+              lut_reuse     : ara_req_i.lut_reuse,
               default       : '0
             };
 
