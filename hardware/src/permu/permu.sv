@@ -20,6 +20,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
     // Operand interface
     input  logic                                       operand_valid_i,
+    input  logic                                       sel_idx_val_i,
     output logic                                       operand_ready_o,
     input  elen_t [NumLanes-1:0][NumBanksPerLane-1:0]  operand_i,
 
@@ -100,7 +101,8 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
    logic selIdxVal, permute_i, result_ready_i, result_valid_o;
    vlut_e lut_mode_i;
    
-   assign selIdxVal = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt][0];
+   // assign selIdxVal = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt][0];
+   assign selIdxVal = sel_idx_val_i;
    assign permute_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == 2'd2;
    // assign result_ready_i = vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt] == 2'd2;
    assign lut_mode_i = vinsn_issue.lut_mode - 1'b1;
@@ -131,8 +133,11 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
    } payload_t;
 
    // Result queue
-   payload_t [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_d, result_queue_q;
-   logic     [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_valid_d, result_queue_valid_q;
+   // payload_t [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_d, result_queue_q;
+   // logic     [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_valid_d, result_queue_valid_q;
+   payload_t [ResultQueueDepth-1:0][NumLanes-1:0] result_queue;
+   logic     [ResultQueueDepth-1:0][NumLanes-1:0] result_queue_valid;
+
    // We need two pointers in the result queue. One pointer to
    // indicate with `payload_t` we are currently writing into (write_pnt),
    // and one pointer to indicate which `payload_t` we are currently
@@ -157,9 +162,10 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
       vinsn_queue_d    = vinsn_queue_q;
       vinsn_running_d  = vinsn_running_q & pe_vinsn_running_i;
 
-      result_queue_d           = result_queue_q;
-      result_queue_valid_d     = result_queue_valid_q;
-      // result_queue_write_pnt_d = result_queue_write_pnt_q;
+      // result_queue_d           = result_queue_q;
+      // result_queue_valid_d     = result_queue_valid_q;
+      result_queue_valid       = '0;
+      result_queue             = '0;
       result_queue_cnt_d       = result_queue_cnt_q;
 
       // Set the response to default
@@ -186,14 +192,14 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
             // Write to the result queue
             for (int unsigned lane = 0; lane < NumLanes; lane++) begin 
-               result_queue_valid_d[0][lane] = 1'b1;
-               result_queue_d[0][lane].id    = vinsn_issue.id;
-               result_queue_d[0][lane].addr  = vaddr(vinsn_issue.vd, NumLanes, VLEN) >> $clog2(NumBanksPerLane);
-               result_queue_d[0][lane].wdata = result_o_shuffled_tmp[lane];
+               result_queue_valid[0][lane] = 1'b1;
+               result_queue[0][lane].id    = vinsn_issue.id;
+               result_queue[0][lane].addr  = vaddr(vinsn_issue.vd, NumLanes, VLEN) >> $clog2(NumBanksPerLane);
+               result_queue[0][lane].wdata = result_o_shuffled_tmp[lane];
             end
 
             `ifdef DEBUG
-            $display("[permu_finish_issue]: vd = %d, addr = %d, issue_cnt = %d, issue_pnt = %d", vinsn_issue.vd, result_queue_d[0][0].addr, vinsn_queue_d.issue_cnt, vinsn_queue_d.issue_pnt);
+            $display("[permu_finish_issue]: vd = %d, addr = %d, issue_cnt = %d, issue_pnt = %d", vinsn_issue.vd, result_queue[0][0].addr, vinsn_queue_d.issue_cnt, vinsn_queue_d.issue_pnt);
             `endif
          end
 
@@ -203,11 +209,14 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
             `ifdef DEBUG
             $display("[permu_fire]");
             `endif
-         end else if(operand_ready_o && operand_valid_i) begin
+         end
+         
+         if(operand_ready_o && operand_valid_i) begin
             vinsn_queue_d.cnt_oprand[vinsn_queue_q.issue_pnt] += 1'b1;
 
             `ifdef DEBUG
-            $display("[permu_oprand]: cnt_oprand_d=%d, lut_mode_i=%d, result_ready_i=%d", vinsn_queue_d.cnt_oprand[vinsn_queue_q.issue_pnt], lut_mode_i, result_ready_i);
+            $display("[permu_oprand]: cnt_oprand_d=%d, lut_mode_i=%d, selIdxVal=%d, operand_valid_i=%d, operand_ready_o=%d", vinsn_queue_d.cnt_oprand[vinsn_queue_q.issue_pnt], lut_mode_i, selIdxVal, operand_valid_i, operand_ready_o);
+            $display("vinsn_queue_q.cnt_oprand=%d, vinsn_queue_q.issue_cnt=%d, vinsn_queue_q.commit_cnt=%d, vinsn_queue_q.issue_pnt=%d", vinsn_queue_q.cnt_oprand[vinsn_queue_q.issue_pnt], vinsn_queue_q.issue_cnt, vinsn_queue_q.commit_cnt, vinsn_queue_q.issue_pnt);
             `endif
          end
       end
@@ -217,10 +226,10 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
       //////////////
 
       for (int unsigned lane = 0; lane < NumLanes; lane++) begin: result_write
-         permu_result_req_o[lane]   = result_queue_valid_q[0][lane];
-         permu_result_id_o[lane]    = result_queue_q[0][lane].id;
-         permu_result_addr_o[lane]  = result_queue_q[0][lane].addr;
-         permu_result_wdata_o[lane] = result_queue_q[0][lane].wdata;
+         permu_result_req_o[lane]   = result_queue_valid[0][lane];
+         permu_result_id_o[lane]    = result_queue[0][lane].id;
+         permu_result_addr_o[lane]  = result_queue[0][lane].addr;
+         permu_result_wdata_o[lane] = result_queue[0][lane].wdata;
       end: result_write
 
 
@@ -230,8 +239,8 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          // Deactivate the request, but do not bump the pointers for now.
          if (&permu_result_req_o && &permu_result_gnt_i) begin
             // Reset the queue
-            result_queue_d[0]       = '0;
-            result_queue_valid_d[0] = '0;
+            // result_queue_d[0]       = '0;
+            // result_queue_valid_d[0] = '0;
 
             // Mark the vector instruction as being done
             pe_resp_d.vinsn_done[vinsn_commit.id] = 1'b1;
@@ -250,23 +259,6 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
             $display("[permu_commit] vinsn_queue_d.commit_cnt=%d, vinsn_queue_d.commit_pnt=%d", vinsn_queue_d.commit_cnt, vinsn_queue_d.commit_pnt);
             `endif
          end
-
-         // PERMU result is valid and ready to be written to the output
-         // if(result_valid_o && result_ready_i) begin
-         //    // Mark the vector instruction as being done
-         //    pe_resp_d.vinsn_done[vinsn_commit.id] = 1'b1;
-
-         //    // Update the commit counters and pointers
-         //    vinsn_queue_d.commit_cnt -= 1;
-         //    if (vinsn_queue_q.commit_pnt == VInsnQueueDepth-1)
-         //       vinsn_queue_d.commit_pnt = '0;
-         //    else
-         //       vinsn_queue_d.commit_pnt += 1;
-
-         //    // Reset the operand counter
-         //    vinsn_queue_d.cnt_oprand[vinsn_queue_q.commit_pnt] = '0;
-
-         // end
       end
 
 
@@ -300,16 +292,16 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          vinsn_queue_q           <= '0;
          pe_resp_o               <= '0;
 
-         result_queue_q          <= '0;
-         result_queue_valid_q    <= '0;
+         // result_queue_q          <= '0;
+         // result_queue_valid_q    <= '0;
          result_queue_cnt_q      <= '0;
       end else begin
          vinsn_running_q         <= vinsn_running_d;
          vinsn_queue_q           <= vinsn_queue_d;
          pe_resp_o               <= pe_resp_d;
 
-         result_queue_q          <= result_queue_d;
-         result_queue_valid_q    <= result_queue_valid_d;
+         // result_queue_q          <= result_queue_d;
+         // result_queue_valid_q    <= result_queue_valid_d;
          result_queue_cnt_q      <= result_queue_cnt_d;
       end
    end

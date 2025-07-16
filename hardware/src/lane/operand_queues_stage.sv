@@ -56,10 +56,12 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     input  logic               [1:0]                 mask_operand_ready_i,
     // Parallel Perm interface with the Vector Register File
     input  elen_t            [NrVRFBanksPerLane-1:0] permu_operand_i,
-    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_i,
+    input  logic                                     permu_operand_valid_i,
+    input  opqueue_e                                 permu_operand_opqueue_i,
     output elen_t            [NrVRFBanksPerLane-1:0] permu_operand_o,
-    output logic             [NrVRFBanksPerLane-1:0] permu_operand_valid_o,
-    input  logic             [NrVRFBanksPerLane-1:0] permu_operand_ready_i
+    output logic                                     permu_sel_idx_val_o,
+    output logic                                     permu_operand_valid_o,
+    input  logic                                     permu_operand_ready_i
   );
 
   `include "common_cells/registers.svh"
@@ -341,13 +343,11 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
    ********************/
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_idx_o;
-  logic  [NrVRFBanksPerLane-1:0] permu_operand_valid_idx_o;
-  logic  [NrVRFBanksPerLane-1:0] permu_operand_ready_idx_o;
-
+  logic permu_operand_valid_idx_o, permu_operand_ready_idx_o;
   operand_permu_queue #(
     .CmdBufDepth        (PermuDataQueueDepth  ),
     .DataBufDepth       (PermuDataQueueDepth  ),
-    .AccessCmdPop       (1'b1                 ),
+    // .AccessCmdPop       (1'b1                 ),
     .NrLanes            (NrLanes              ),
     .NrVRFBanksPerLane  (NrVRFBanksPerLane   ),
     .VLEN               (VLEN                 ),
@@ -361,7 +361,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_queue_cmd_valid_i(operand_queue_cmd_valid_i[PermIdx]      ),
     .cmd_pop_o                (/* Unused */                            ),
     .operand_i                (permu_operand_i                         ),
-    .operand_valid_i          (permu_operand_valid_i                   ),
+    .operand_valid_i          (permu_operand_valid_i && permu_operand_opqueue_i==PermIdx),
     .operand_issued_i         (operand_issued_i[PermIdx]               ),
     .operand_queue_ready_o    (operand_queue_ready_o[PermIdx]          ),
     .operand_o                (permu_operand_idx_o                     ),
@@ -371,9 +371,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
   );
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_val_o;
-  logic  [NrVRFBanksPerLane-1:0] permu_operand_valid_val_o;
-  logic  [NrVRFBanksPerLane-1:0] permu_operand_ready_val_o;
-
+  logic permu_operand_valid_val_o, permu_operand_ready_val_o;
   operand_permu_queue #(
     .CmdBufDepth        (PermuDataQueueDepth  ),
     .DataBufDepth       (PermuDataQueueDepth  ),
@@ -391,7 +389,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_queue_cmd_valid_i(operand_queue_cmd_valid_i[PermVal]      ),
     .cmd_pop_o                (/* Unused */                            ),
     .operand_i                (permu_operand_i                         ),
-    .operand_valid_i          (permu_operand_valid_i                   ),
+    .operand_valid_i          (permu_operand_valid_i && permu_operand_opqueue_i==PermVal),
     .operand_issued_i         (operand_issued_i[PermVal]               ),
     .operand_queue_ready_o    (operand_queue_ready_o[PermVal]          ),
     .operand_o                (permu_operand_val_o                     ),
@@ -400,8 +398,42 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_ready_i          (permu_operand_ready_i                   )
   );
 
-  assign permu_operand_o = permu_operand_valid_val_o? permu_operand_val_o : permu_operand_idx_o;
-  assign permu_operand_valid_o = permu_operand_valid_val_o | permu_operand_valid_idx_o;
+
+  // A simple arbiter to select the operand. Idx has higher priority.
+  typedef struct packed {
+    elen_t [NrVRFBanksPerLane-1:0] data;
+  } payload_t;
+  logic gnt_val, gnt_idx, tmp_gnt;
+  rr_arb_tree #(
+    .NumIn    (2               ),
+    .DataWidth($bits(payload_t)),
+    .AxiVldRdy(1'b0            ),
+    .ExtPrio  (1'b1            )
+  ) i_vrf_arbiter (
+    .clk_i  (clk_i                            ),
+    .rst_ni (rst_ni                           ),
+    .flush_i(1'b0                             ),
+    .rr_i   (1'b0                             ),
+    .data_i ({permu_operand_val_o, permu_operand_idx_o}         ),
+    .req_i  ({permu_operand_valid_val_o, permu_operand_valid_idx_o} ),
+    .gnt_o  ({gnt_val, gnt_idx} ),
+    .data_o (permu_operand_o),
+    .idx_o (/* Unused */    ),
+    .req_o (tmp_gnt),
+    .gnt_i (tmp_gnt) // Acknowledge it directly
+  );
+
+  assign permu_operand_valid_o = gnt_val | gnt_idx;
+  assign permu_sel_idx_val_o = gnt_idx? 1'b0 : 1'b1;
+  
+  // `ifdef DEBUG
+  // always @(posedge clk_i) begin
+  //   if (permu_operand_valid_idx_o && permu_operand_valid_val_o) begin
+  //     $display("[Operand Queues Stage] IO conflict!");
+  //   end
+  // end
+  // `endif
+
 
   // `ifdef DEBUG
   // always @(posedge clk_i) begin

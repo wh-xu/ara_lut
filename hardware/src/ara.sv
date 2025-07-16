@@ -319,21 +319,13 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .lsu_current_burst_exception_i(lsu_current_burst_exception)
   );
 
-  `ifdef DEBUG
-  always_ff @(posedge clk_i) begin
-    if(pe_req_valid) begin
-      $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
-      
-      $display("[ARA] global_hazard_table");
-      for(int i=0; i<NrVInsn; i++) begin
-        for(int j=0; j<NrVInsn; j++) begin
-          $write("%h ", global_hazard_table[i][j]);
-        end
-        $display("");
-      end
-    end
-  end
-  `endif
+  // `ifdef DEBUG
+  //   always_ff @(posedge clk_i) begin
+  //     if(pe_req_valid) begin
+  //       $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
+  //     end
+  //   end
+  // `endif
 
   // Scalar move support
   always_comb begin
@@ -390,8 +382,9 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   vrgat_req_t                                  masku_vrgat_req;
   // Parallel LUT
   elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_operand_lane_o;
-  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_operand_valid_lane_o;
-  logic  [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_operand_ready_lane_i;
+  logic  [NrLanes-1:0]                         permu_sel_idx_val_lane_o;
+  logic  [NrLanes-1:0]                         permu_operand_valid_lane_o;
+  logic  [NrLanes-1:0]                         permu_operand_ready_lane_i;
 
   logic     [NrLanes-1:0]                      permu_result_req;
   vid_t     [NrLanes-1:0]                      permu_result_id;
@@ -483,6 +476,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
       .mask_ready_o                    (lane_mask_ready[lane]               ),
       // Interface with the parallel permutation network in mask unit
       .permu_operand_o                 (permu_operand_lane_o[lane]          ),
+      .permu_sel_idx_val_o             (permu_sel_idx_val_lane_o[lane]      ),
       .permu_operand_valid_o           (permu_operand_valid_lane_o[lane]    ),
       .permu_operand_ready_i           (permu_operand_ready_lane_i[lane]    ),
 
@@ -525,6 +519,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .clk_i                    (clk_i                            ),
     .rst_ni                   (rst_ni                           ),
     .operand_i                (permu_operand_lane_o             ),
+    .sel_idx_val_i            (|permu_sel_idx_val_lane_o        ),
     .operand_valid_i          (permu_operand_valid_i            ),
     .operand_ready_o          (permu_operand_ready_o            ),
     // Interface with the main sequencer
@@ -541,8 +536,8 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .permu_result_gnt_i       (permu_result_gnt                 )
   );
 
-  assign permu_operand_valid_i = &permu_operand_valid_lane_o;
-  assign permu_operand_ready_lane_i = {(NrVRFBanksPerLane*NrLanes){permu_operand_ready_o}};
+  assign permu_operand_valid_i = |permu_operand_valid_lane_o;
+  assign permu_operand_ready_lane_i = {NrLanes{permu_operand_ready_o}};
 
 
   //////////////////////////////

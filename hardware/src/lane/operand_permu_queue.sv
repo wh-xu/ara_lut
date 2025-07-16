@@ -7,7 +7,6 @@
 module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter  int           unsigned CmdBufDepth         = 2,
     parameter  int           unsigned DataBufDepth        = 2,
-    parameter  int           unsigned NrSlaves            = 1,
     parameter  int           unsigned NrLanes             = 0,
     parameter  int           unsigned NrVRFBanksPerLane   = 8,
     parameter  int           unsigned VLEN                = 0,
@@ -30,14 +29,14 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
     output logic                              cmd_pop_o,
     // Interface with the Vector Register File
     input  elen_t   [NrVRFBanksPerLane-1:0]   operand_i,
-    input  logic    [NrVRFBanksPerLane-1:0]   operand_valid_i,
+    input  logic                              operand_valid_i,
     input  logic                              operand_issued_i,
     output logic                              operand_queue_ready_o,
     // Interface with the functional units
     output elen_t   [NrVRFBanksPerLane-1:0]   operand_o,
     output target_fu_e                        operand_target_fu_o,
-    output logic    [NrVRFBanksPerLane-1:0]   operand_valid_o,
-    input  logic    [NrSlaves-1:0]            operand_ready_i
+    output logic                              operand_valid_o,
+    input  logic                              operand_ready_i
   );
 
   //////////////////////
@@ -91,7 +90,7 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
     .testmode_i(1'b0            ),
     .flush_i   (flush_i         ),
     .data_i    (operand_i       ),
-    .push_i    (&operand_valid_i),
+    .push_i    (operand_valid_i ),
     .full_o    (/* Unused */    ),
     .data_o    (ibuf_operand    ),
     .pop_i     (ibuf_pop        ),
@@ -157,12 +156,12 @@ module operand_permu_queue import ara_pkg::*; import rvv_pkg::*; import cf_math_
 
     // Send the operand
     operand_o       = conv_operand;
-    operand_valid_o = {NrVRFBanksPerLane{ibuf_operand_valid}};
+    operand_valid_o = ibuf_operand_valid;
     // Default encoding: SLDU == 1'b0, ADDRGEN == 1'b1
     operand_target_fu_o = cmd.target_fu;
 
     // Account for sent operands
-    if (operand_valid_o && |operand_ready_i) begin
+    if (operand_valid_o && operand_ready_i) begin
       // Finished using an operand
       if (cmd.conv == OpQueueConversionNone) ibuf_pop = 1'b1;
 

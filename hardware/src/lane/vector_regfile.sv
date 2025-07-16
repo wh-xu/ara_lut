@@ -29,9 +29,9 @@ module vector_regfile import ara_pkg::*; #(
     output logic     [NrOperandQueues-1:0] operand_valid_o,
     // Operands for parallel LUT
     output elen_t    [NrBanks-1:0]         operand_permu_o,
-    output logic     [NrBanks-1:0]         operand_permu_valid_o
-  )
-  ;
+    output logic                           operand_permu_valid_o,
+    output opqueue_e                       operand_permu_opqueue_o
+  );
 
 `include "common_cells/registers.svh"
 
@@ -132,6 +132,7 @@ module vector_regfile import ara_pkg::*; #(
   );
 
   assign operand_permu_o = &rdata_valid_q? rdata: '0;
-  assign operand_permu_valid_o = &rdata_valid_q? rdata_valid_q : '0;
+  assign operand_permu_valid_o = &rdata_valid_q? 1'b1 : '0;
+  assign operand_permu_opqueue_o = &rdata_valid_q? tgt_opqueue_q : '0;
 
 endmodule : vector_regfile

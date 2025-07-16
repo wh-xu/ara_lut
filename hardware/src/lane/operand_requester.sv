@@ -82,12 +82,6 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  strb_t                                      ldu_result_be_i,
     output logic                                       ldu_result_gnt_o,
     output logic                                       ldu_result_final_gnt_o
-    // Permutation unit
-    // input  logic                                       permu_result_req_i,
-    // input  vid_t                                       permu_result_id_i,
-    // input  vaddr_t                                     permu_result_addr_i,
-    // input  elen_t [NrVRFBanksPerLane-1:0]              permu_result_wdata_i,
-    // output logic                                       permu_result_gnt_o
   );
 
   import cf_math_pkg::idx_width;
@@ -221,7 +215,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
     // Which vector instructions are writing something?
     // TODO: this needs to be disabled when the PERMU is active
-    if(~(|permu_active_table_i)) begin
+    // if(~(|permu_active_table_i)) begin
+    if(0) begin
       vinsn_result_written_d[alu_result_id_i] |= alu_result_gnt_o;
       vinsn_result_written_d[mfpu_result_id_i] |= mfpu_result_gnt_o;
       vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
@@ -448,17 +443,15 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
             // TODO: activate all banks
             if(requester_metadata_q.lut_mode > rvv_pkg::CBSEQ) begin
               lane_operand_req_transposed[requester_index] = {NrBanks{!stall}};
+
               // `ifdef DEBUG
-              // $display("[OP REQ] lut_mode=%h, bank=%d, stall=%h", requester_metadata_q.lut_mode, bank, stall);
-              // $display("Lane_operand_req_transposed=%h", lane_operand_req_transposed[requester_index]);
+              // if(requester_index == PermVal) begin
+              //   $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
+              // end
               // `endif
             end else begin
               lane_operand_req_transposed[requester_index][bank] = !stall;
-              `ifdef DEBUG
-              // if(stall) begin
-                // $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
-              // end
-              `endif
+
             end
             operand_payload[requester_index]   = '{
               addr   : requester_metadata_q.addr >> $clog2(NrBanks),
@@ -537,6 +530,13 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       endcase
       // Always keep the hazard bits up to date with the global hazard table
       requester_metadata_d.hazard &= global_hazard_table_i[requester_metadata_d.id];
+
+      // `ifdef DEBUG
+      //   if(stall) begin
+      //     $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
+      //     $display("requester_metadata_d.id=%d, global_hazard_table_i[requester_metadata_d.id]=%h, requester_metadata_d.hazard=%b", requester_metadata_d.id, global_hazard_table_i[requester_metadata_d.id], requester_metadata_d.hazard);
+      //   end
+      // `endif
 
       // Kill all store-unit, idx, and mem-masked requests in case of exceptions
       if (lsu_ex_flush_o && (requester_index == StA || requester_index == SlideAddrGenA || requester_index == MaskM)) begin : vlsu_exception_idle
@@ -618,15 +618,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       opqueue: AluA,
       default: '0
     };
-    // TODO: add perm unit
-    // operand_payload[NrOperandQueues + VFU_PermUnit] = '{
-    //   addr   : permu_result_addr >> $clog2(NrBanks),
-    //   wen    : 1'b1,
-    //   wdata  : permu_result_wdata,
-    //   be     : permu_result_be,
-    //   opqueue: AluA,
-    //   default: '0
-    // };
+
 
     // Store their request value
     ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] = alu_result_req_i;
@@ -634,7 +626,6 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     ext_operand_req[masku_result_addr[idx_width(NrBanks)-1:0]][VFU_MaskUnit] = masku_result_req;
     ext_operand_req[sldu_result_addr[idx_width(NrBanks)-1:0]][VFU_SlideUnit] = sldu_result_req;
     ext_operand_req[ldu_result_addr[idx_width(NrBanks)-1:0]][VFU_LoadUnit] = ldu_result_req;
-    // ext_operand_req[permu_result_addr[idx_width(NrBanks)-1:0]][VFU_PermUnit] = permu_result_req;
 
     // Generate the grant signals
     alu_result_gnt_o  = 1'b0;
@@ -729,6 +720,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   //   always_ff @(posedge clk_i) begin
   //     if (vrf_req_o[bank]) begin
   //       $display("[GENERIC OP REQ] bank=%d, vrf_addr_o=%h, wen=%h", bank, vrf_addr_o[bank], vrf_wen_o[bank]);
+  //       $display("operand_gnt=%b", operand_gnt[bank]);
   //     end
   //   end
   // `endif

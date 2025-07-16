@@ -357,7 +357,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         default        : '0
       };
       vfu_operation_d.vtype.vsew = pe_req.op inside {[VMFEQ:VMSGT]} ? pe_req.eew_vs2 : pe_req.vtype.vsew;
-      vfu_operation_valid_d = (vfu_operation_d.vfu != VFU_None) ? 1'b1 : 1'b0;
+      vfu_operation_valid_d = (vfu_operation_d.vfu inside {VFU_None, VFU_PermUnit}) ? 1'b0 : 1'b1; // Bypass VFU_None and VFU_PermUnit
 
       // Vector length calculation
       vfu_operation_d.vl = pe_req.vl / NrLanes;
