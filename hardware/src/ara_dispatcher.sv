@@ -82,7 +82,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
   `FF(csr_vxrm_q, csr_vxrm_d, '0)
   // Converts between the internal representation of `vtype_t` and the full XLEN-bit CSR.
   function automatic xlen_t xlen_vtype(vtype_t vtype);
-    xlen_vtype = {vtype.vill, {CVA6Cfg.XLEN-13{1'b0}}, vtype.vreuse, vtype.vlut, vtype.vma, vtype.vta, vtype.vsew,
+    xlen_vtype = {vtype.vill, {CVA6Cfg.XLEN-13{1'b0}}, vtype.vlut_pack, vtype.vlut, vtype.vma, vtype.vta, vtype.vsew,
       vtype.vlmul[2:0]};
   endfunction: xlen_vtype
 
@@ -90,7 +90,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
   function automatic vtype_t vtype_xlen(xlen_t xlen);
     vtype_xlen = '{
       vill  : xlen[CVA6Cfg.XLEN-1],
-      vreuse: vreuse_e'(xlen[11]),
+      vlut_pack : vlut_pack_e'(xlen[11]),
       vlut  : vlut_e'(xlen[10:8]),
       vma   : xlen[7],
       vta   : xlen[6],
@@ -721,9 +721,9 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                     // The MASKU will ask for elements from vs2 through the MaskB opqueue
                     // and deshuffle them with eew_vd_op encoding
                     ara_req.eew_vd_op = eew_q[ara_req.vs2];
-                    // Add vlut flag to req
+                    // Add vlut flags to req
                     ara_req.lut_mode = csr_vtype_q.vlut;
-                    ara_req.lut_reuse = csr_vtype_q.vreuse;
+                    ara_req.lut_pack = csr_vtype_q.vlut_pack;
                   end
                   6'b010000: begin
                     ara_req.op = ara_pkg::VADC;

@@ -160,7 +160,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
 
     // Config bits for lookup table (LUT) mode
     rvv_pkg::vlut_e lut_mode;
-    rvv_pkg::vreuse_e lut_reuse;
+    rvv_pkg::vlut_pack_e lut_pack;
   } ara_req_t;
 
   typedef struct packed {
@@ -320,13 +320,13 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
     .lsu_current_burst_exception_i(lsu_current_burst_exception)
   );
 
-  // `ifdef DEBUG
-  //   always_ff @(posedge clk_i) begin
-  //     if(pe_req_valid) begin
-  //       $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
-  //     end
-  //   end
-  // `endif
+  `ifdef DEBUG
+    always_ff @(posedge clk_i) begin
+      if(pe_req_valid && pe_req_ready) begin
+        $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
+      end
+    end
+  `endif
 
   // Scalar move support
   always_comb begin
@@ -386,6 +386,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   logic  [NrLanes-1:0]                         permu_sel_idx_val_lane_o;
   logic  [NrLanes-1:0]                         permu_operand_valid_lane_o;
   logic  [NrLanes-1:0]                         permu_operand_ready_lane_i;
+  // logic  [1:0][NrLanes-1:0]                    permu_operand_ready_lane_i;
 
   logic     [NrLanes-1:0]                      permu_result_req;
   vid_t     [NrLanes-1:0]                      permu_result_id;
@@ -495,15 +496,6 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
 
   logic  permu_operand_valid_i;
   logic  permu_operand_ready_o;
-
-  logic  permu_selIdxVal;
-  logic  permu_permute_i;
-  vlut_e permu_lut_mode_i;
-
-  logic permu_result_ready_i;
-  logic [NrVRFBanksPerLane-1:0] permu_result_ready_Lane;
-  logic permu_result_valid_o;
-
 
   permu #(
     .NumLanes(NrLanes),

@@ -108,9 +108,6 @@ module vector_regfile import ara_pkg::*; #(
   //  Multiplexer  //
   ///////////////////
 
-  assign rdata_xbar = &rdata_valid_q? '0 : rdata;
-  assign rdata_valid_xbar_q = &rdata_valid_q? '0 : rdata_valid_q;
-
   stream_xbar #(
     .NumInp   (NrBanks        ),
     .NumOut   (NrOperandQueues),
@@ -121,7 +118,7 @@ module vector_regfile import ara_pkg::*; #(
     .rst_ni (rst_ni         ),
     .flush_i(1'b0           ),
     .rr_i   ('0             ),
-    .data_i (rdata_xbar     ),
+    .data_i (rdata     ),
     .valid_i(rdata_valid_xbar_q  ),
     .ready_o(/* Unused */   ),
     .sel_i  (tgt_opqueue_q  ),
@@ -131,8 +128,13 @@ module vector_regfile import ara_pkg::*; #(
     .ready_i('1             ) // Always ready
   );
 
-  assign operand_permu_o = &rdata_valid_q? rdata: '0;
-  assign operand_permu_valid_o = &rdata_valid_q? 1'b1 : '0;
-  assign operand_permu_opqueue_o = &rdata_valid_q? tgt_opqueue_q : '0;
+  // for(genvar i=0; i<NrBanks; i++) begin: gen_rdata_xbar
+  //   assign rdata_valid_xbar_q[i] = tgt_opqueue_q[i] inside {PermIdx, PermVal} ? '0 : rdata_valid_q[i];
+  //   assign operand_permu_o[i] = tgt_opqueue_q[i] inside {PermIdx, PermVal} ? rdata[i] : '0;
+  // end
+  assign rdata_valid_xbar_q = tgt_opqueue_q[0] inside {PermIdx, PermVal} ? '0 : rdata_valid_q;
+  assign operand_permu_o = rdata;
+  assign operand_permu_valid_o = tgt_opqueue_q[0] inside {PermIdx, PermVal} ? &rdata_valid_q : '0;
+  assign operand_permu_opqueue_o = tgt_opqueue_q[0];
 
 endmodule : vector_regfile

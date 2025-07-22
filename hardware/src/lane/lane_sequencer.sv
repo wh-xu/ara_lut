@@ -25,8 +25,6 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     input  logic                 [NrVInsn-1:0]            pe_vinsn_running_i,
     output logic                                          pe_req_ready_o,
     output pe_resp_t                                      pe_resp_o,
-    //
-    input hist_tag_t [31:0]                               lut_operand_table_i,
     // Support for store exception flush
     input  logic                                          lsu_ex_flush_i,
     output logic                                          lsu_ex_flush_o,
@@ -75,9 +73,6 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
   logic    pe_req_valid;
   logic    pe_req_ready;
 
-  hist_tag_t [31:0] last_lut_operand_changed_tag_d;
-  hist_tag_t [31:0] last_lut_operand_changed_tag_q;
-
   fall_through_register #(
     .T(pe_req_t)
   ) i_pe_req_register (
@@ -122,11 +117,9 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
     if (!rst_ni) begin
       last_id_q      <= '0;
       en_sync_mask_q <= 1'b0;
-      last_lut_operand_changed_tag_q <= '0;
     end else begin
       last_id_q      <= last_id_d;
       en_sync_mask_q <= en_sync_mask_d;
-      last_lut_operand_changed_tag_q <= last_lut_operand_changed_tag_d;
     end
   end
 
@@ -960,14 +953,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             if ((operand_request[PermIdx].vl * NrLanes) != pe_req.vl)
               operand_request[PermIdx].vl += 1;
           end
-          if (pe_req.lut_reuse==VREUSE_ON && lut_operand_table_i[pe_req.vs1] == last_lut_operand_changed_tag_q[pe_req.vs1]) begin
-            // Bypass idx operand fetching if reuse is enabled
-            operand_request_push[PermIdx] = 1'b0;
-          end else begin
-            // Synchronize the last_lut_operand_changed_tag_q with the lut_operand_table_i
-            operand_request_push[PermIdx] = 1'b1;
-            last_lut_operand_changed_tag_d[pe_req.vs1] = lut_operand_table_i[pe_req.vs1];
-          end
+          operand_request_push[PermIdx] = pe_req.use_vs1;
 
           operand_request[PermVal] = '{
             id      : pe_req.id,
@@ -993,7 +979,6 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             if ((operand_request[PermVal].vl * NrLanes) != pe_req.vl)
               operand_request[PermVal].vl += 1;
           end
-          // Bypass val operand fetching if reuse is enabled
           operand_request_push[PermVal] = pe_req.use_vs2;
 
         end

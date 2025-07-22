@@ -42,26 +42,25 @@ package rvv_pkg;
   // LUT type
   typedef enum logic [2:0] {
     CBSEQ = 3'b000,
-    CB16  = 3'b001,
-    CB32  = 3'b010,
-    CB64  = 3'b011,
-    CB128 = 3'b100,
-    CB256 = 3'b101
+    CB4   = 3'b001,
+    CB8   = 3'b010,
+    CB16  = 3'b011,
+    CB32  = 3'b100,
+    CB64  = 3'b101,
+    CB128 = 3'b110,
+    CB256 = 3'b111
   } vlut_e;
 
-  // LUT oprand reuse
+  // 
   typedef enum logic {
-    VREUSE_OFF = 1'b0,
-    VREUSE_ON  = 1'b1
-  } vreuse_e;
-
-  // History tag
-  typedef logic [3:0] hist_tag_t;
+    VPACK_OFF = 1'b0,
+    VPACK_ON  = 1'b1
+  } vlut_pack_e;
 
   // Vector type register
   typedef struct packed {
     logic vill;
-    vreuse_e vreuse;
+    vlut_pack_e vlut_pack;
     vlut_e vlut;
     logic vma;
     logic vta;

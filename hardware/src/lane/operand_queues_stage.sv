@@ -367,7 +367,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_o                (permu_operand_idx_o                     ),
     .operand_target_fu_o      (/* Unused */                            ),
     .operand_valid_o          (permu_operand_valid_idx_o               ),
-    .operand_ready_i          (permu_operand_ready_i                   )
+    .operand_ready_i          (permu_operand_ready_i               )
   );
 
   elen_t [NrVRFBanksPerLane-1:0] permu_operand_val_o;
@@ -395,7 +395,7 @@ module operand_queues_stage import ara_pkg::*; import rvv_pkg::*; import cf_math
     .operand_o                (permu_operand_val_o                     ),
     .operand_target_fu_o      (/* Unused */                            ),
     .operand_valid_o          (permu_operand_valid_val_o               ),
-    .operand_ready_i          (permu_operand_ready_i                   )
+    .operand_ready_i          (permu_operand_ready_i               )
   );
 
 

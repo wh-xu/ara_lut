@@ -649,7 +649,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic payload_hp_req;
     logic payload_hp_gnt;
     rr_arb_tree #(
-      .NumIn    (unsigned'(MulFPUC) - unsigned'(AluA) + 1 + unsigned'(VFU_MFpu) - unsigned'(VFU_Alu) + 1),
+      .NumIn    (unsigned'(MulFPUC) - unsigned'(AluA) + 1 + unsigned'(VFU_MFpu) - unsigned'(VFU_Alu) + 1 + 2),
       .DataWidth($bits(payload_t)                                                   ),
       .AxiVldRdy(1'b0                                                               )
     ) i_hp_vrf_arbiter (
@@ -658,11 +658,14 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .flush_i(1'b0  ),
       .rr_i   ('0    ),
       .data_i ({operand_payload[MulFPUC:AluA],
-          operand_payload[NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu]} ),
+          operand_payload[NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu], 
+          operand_payload[PermVal:PermIdx] } ),
       .req_i ({lane_operand_req[bank][MulFPUC:AluA],
-          ext_operand_req[bank][VFU_MFpu:VFU_Alu]}),
+          ext_operand_req[bank][VFU_MFpu:VFU_Alu],
+          lane_operand_req[bank][PermVal:PermIdx]}),
       .gnt_o ({operand_gnt[bank][MulFPUC:AluA],
-          operand_gnt[bank][NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu]}),
+          operand_gnt[bank][NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu],
+          operand_gnt[bank][PermVal:PermIdx]}),
       .data_o (payload_hp    ),
       .idx_o  (/* Unused */  ),
       .req_o  (payload_hp_req),
@@ -674,7 +677,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic payload_lp_req;
     logic payload_lp_gnt;
     rr_arb_tree #(
-      .NumIn(unsigned'(PermVal)- unsigned'(MaskB) + 1 + unsigned'(VFU_PermUnit) - unsigned'(VFU_SlideUnit) + 1),
+      .NumIn(unsigned'(SlideAddrGenA)- unsigned'(MaskB) + 1 + unsigned'(VFU_LoadUnit) - unsigned'(VFU_SlideUnit) + 1),
       .DataWidth($bits(payload_t)                                                               ),
       .AxiVldRdy(1'b0                                                                           )
     ) i_lp_vrf_arbiter (
@@ -682,12 +685,12 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .rst_ni (rst_ni),
       .flush_i(1'b0  ),
       .rr_i   ('0    ),
-      .data_i ({operand_payload[PermVal:MaskB],
-          operand_payload[NrOperandQueues + VFU_PermUnit:NrOperandQueues + VFU_SlideUnit]} ),
-      .req_i ({lane_operand_req[bank][PermVal:MaskB],
-          ext_operand_req[bank][VFU_PermUnit:VFU_SlideUnit]}),
-      .gnt_o ({operand_gnt[bank][PermVal:MaskB],
-          operand_gnt[bank][NrOperandQueues + VFU_PermUnit:NrOperandQueues + VFU_SlideUnit]}),
+      .data_i ({operand_payload[SlideAddrGenA:MaskB],
+          operand_payload[NrOperandQueues + VFU_LoadUnit:NrOperandQueues + VFU_SlideUnit]} ),
+      .req_i ({lane_operand_req[bank][SlideAddrGenA:MaskB],
+          ext_operand_req[bank][VFU_LoadUnit:VFU_SlideUnit]}),
+      .gnt_o ({operand_gnt[bank][SlideAddrGenA:MaskB],
+          operand_gnt[bank][NrOperandQueues + VFU_LoadUnit:NrOperandQueues + VFU_SlideUnit]}),
       .data_o (payload_lp    ),
       .idx_o  (/* Unused */  ),
       .req_o  (payload_lp_req),
@@ -716,14 +719,13 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     );
   
 
-  // `ifdef DEBUG
-  //   always_ff @(posedge clk_i) begin
-  //     if (vrf_req_o[bank]) begin
-  //       $display("[GENERIC OP REQ] bank=%d, vrf_addr_o=%h, wen=%h", bank, vrf_addr_o[bank], vrf_wen_o[bank]);
-  //       $display("operand_gnt=%b", operand_gnt[bank]);
-  //     end
-  //   end
-  // `endif
+  `ifdef DEBUG
+    always_ff @(posedge clk_i) begin
+      if (vrf_req_o[bank]) begin
+        $display("[GENERIC OP REQ] bank=%d, vrf_addr_o=%h, wen=%h, tgt_opqueue_o=%h", bank, vrf_addr_o[bank], vrf_wen_o[bank], vrf_tgt_opqueue_o[bank]);
+      end
+    end
+  `endif
 
   end : gen_vrf_arbiters
 

@@ -253,8 +253,6 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   assign pe_req    = pe_req_i;
   assign pe_resp_o = pe_resp;
 
-  hist_tag_t [31:0] lut_operand_table;
-
   lane_sequencer #(
     .NrLanes              (NrLanes              ),
     .pe_req_t             (pe_req_t             ),
@@ -271,8 +269,6 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .pe_vinsn_running_i     (pe_vinsn_running_i   ),
     .pe_req_ready_o         (pe_req_ready_o       ),
     .pe_resp_o              (pe_resp              ),
-    //
-    .lut_operand_table_i    (lut_operand_tag_table),
     // Support for store exception flush
     .lsu_ex_flush_i         (lsu_ex_flush_i       ),
     .lsu_ex_flush_o         (lsu_ex_flush_op_req_d),
@@ -461,40 +457,6 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   );
 
 
-  //////////////////////////////////////////////////////////////////////////////////////////
-  // A tag table to track if each operand is changed between two consecutive LUT requests
-  // This is used to support reuse of the val operand
-  hist_tag_t [31:0] lut_operand_changed_table_d;
-  hist_tag_t [31:0] lut_operand_changed_table_q;
-  hist_tag_t [31:0] lut_operand_tag_table;
-
-
-  always_comb begin
-    lut_operand_tag_table = lut_operand_changed_table_q;
-
-    lut_operand_changed_table_d = lut_operand_changed_table_q;
-
-    // Update the tag for the operand that is being written to
-    // Currently we only check the first bank
-    // TODO: check all banks
-    if (vrf_wen[0]) begin
-      lut_operand_changed_table_d[vrf_addr[0]] = lut_operand_changed_table_q[vrf_addr[0]] + 1'b1;
-      `ifdef DEBUG
-        $display("[OP REQ] lut_operand_changed_table_d[%d] = %d", vrf_addr[0], lut_operand_changed_table_d[vrf_addr[0]]);
-      `endif
-    end
-  end
-
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      lut_operand_changed_table_q <= '0;
-    end else begin
-      lut_operand_changed_table_q <= lut_operand_changed_table_d;
-    end
-  end
-  //////////////////////////////////////////////////////////////////////////////////////////
-
-
   /////////////////////////////////////////
   // Add a last-level arbiter for PERMU  //
   /////////////////////////////////////////
@@ -517,6 +479,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     be: vrf_be_generic,
     opqueue: vrf_tgt_opqueue_generic};
  
+  // This is for write-back op
   payload_t payload_permu;
   assign payload_permu = '{
     req: {NrVRFBanksPerLane{permu_result_req_i}},
@@ -524,7 +487,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     wen: {NrVRFBanksPerLane{permu_result_req_i}},
     wdata: permu_result_wdata_i,
     be: '1,
-    opqueue: '0};
+    opqueue: {NrVRFBanksPerLane{PermVal}}};
 
   // Instantiate a RR arbiter per bank
   // Generic VRF should have higher priority than PERMU
@@ -539,7 +502,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .rst_ni (rst_ni                           ),
     .flush_i(1'b0                             ),
     .rr_i   (1'b0                             ),
-    .data_i ({payload_generic, payload_permu}         ),
+    .data_i ({payload_generic, payload_permu} ),
     .req_i  ({|vrf_req_generic, |permu_result_req_i} ),
     .gnt_o  ({vrf_gnt_generic, permu_gnt} ),
     .data_o ({vrf_req, vrf_addr, vrf_wen, vrf_wdata, vrf_be, vrf_tgt_opqueue}),
@@ -554,16 +517,8 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   `ifdef DEBUG
   // Display vrgat_req_d for debugging
   always @(posedge clk_i) begin
-    // if(vrf_gnt_generic) begin
-    //   $display("[VRF-ARB]lane-%d vrf_gnt_generic req=%h, addr=%h, wen=%h", lane_id_i, vrf_req, vrf_addr, vrf_wen);
-    // end
-
     if(&vrf_req && &(~vrf_wen)) begin
-      $display("[VRF]lane-%d permu_operand read from vrf_addr=%h", lane_id_i, vrf_addr[0]);
-      // for(int i=0; i<NrVRFBanksPerLane/2; i++) begin
-      //   $write("%h ", permu_operand_vrf_o[i]);
-      // end
-      // $display("");
+      $display("[VRF]lane-%d permu_operand read from vrf_addr=%h with vrf_tgt_opqueue=%h, vrf_gnt_generic=%b, permu_gnt=%b", lane_id_i, vrf_addr[0], vrf_tgt_opqueue[0], vrf_gnt_generic, permu_gnt);
     end else if (&vrf_req && &vrf_wen) begin
        $display("[VRF]lane-%d permu_operand write to vrf_addr=%h", lane_id_i, vrf_addr[0]);
       // for(int i=0; i<NrVRFBanksPerLane/2; i++) begin
