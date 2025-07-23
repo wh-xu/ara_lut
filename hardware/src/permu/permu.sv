@@ -20,7 +20,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
     // Operand interface
     input  logic                                       operand_valid_i,
-    output logic                                       operand_ready_o,
+    output logic [1:0]                                 operand_ready_o,
     input  logic                                       sel_idx_val_i,
     input  elen_t [NumLanes-1:0][NumBanksPerLane-1:0]  operand_i,
 
@@ -103,19 +103,16 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
    assign lut_pack_i = vinsn_issue.lut_pack;
 
    // Permutation control
-   // logic [1:0] status_operand_d;
-   // logic [1:0] status_operand_q;
-   logic operand_ready_permu, selIdxVal, permute_i, result_ready_i, result_valid_o;
+   // Counter for fetched operands 
+   logic [1:0] status_operand_d, status_operand_q;
+   logic operand_ready_permu_o, selIdxVal, permute_i, result_ready_i, result_valid_o;
    logic [15:0] mask_idx_bit_d, mask_idx_bit_q;
    logic [3:0] rshift_idx_bit_d, rshift_idx_bit_q;
 
-   // assign operand_ready_o = status_operand_q;
    assign selIdxVal = sel_idx_val_i;
-   // assign permute_i = (|(~status_operand_q)) && operand_ready_permu;
-   assign permute_i = cnt_oprand_q == 2'd2;
+   assign operand_ready_o = (~status_operand_q) & {2{operand_ready_permu_o}};
+   assign permute_i = &status_operand_q;
 
-   // Counter for fetched operands 
-   cnt_t cnt_oprand_d, cnt_oprand_q;
    // Counter for produced outputs
    cnt_t cnt_output_d, cnt_output_q;
    // Counter for termination
@@ -162,15 +159,15 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
    always_comb begin
       // Maintain state
-      result_ready_i   = '1;
+      result_ready_i           = '1;
       result_queue_valid       = '0;
       result_queue             = '0;
       result_queue_cnt_d       = result_queue_cnt_q;
 
       vinsn_queue_d    = vinsn_queue_q;
       vinsn_running_d  = vinsn_running_q & pe_vinsn_running_i;
-      // status_operand_d = status_operand_q;
-      cnt_oprand_d     = cnt_oprand_q;
+
+      status_operand_d = status_operand_q;
       cnt_output_d     = cnt_output_q;
 
       // Shift and mask for index
@@ -231,24 +228,17 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          end
 
          if (permute_i) begin
-            // vinsn_queue_d.cnt_oprand[vinsn_queue_q.issue_pnt] = '0;
-
-            // TODO: add bit mask and rshift
-            // mask_idx_bit_i = 16'hFFFF;
-            // rshift_idx_bit_i = '0;
-
             `ifdef DEBUG
             $display("[permu_fire]");
             `endif
          end
          
-         if(operand_ready_o && operand_valid_i) begin
-            // status_operand_d[sel_idx_val_i] = 1'b1;
-            cnt_oprand_d = cnt_oprand_q + 1;
+         if(operand_ready_o[sel_idx_val_i] && operand_valid_i) begin
+            status_operand_d[sel_idx_val_i] = 1'b1;
 
             `ifdef DEBUG
-            $display("[permu_oprand]: cnt_oprand_d=%d, lut_mode_i=%d, selIdxVal=%d, operand_valid_i=%d, operand_ready_o=%d", cnt_oprand_d, lut_mode_i, selIdxVal, operand_valid_i, operand_ready_o);
-            $display("cnt_oprand_q=%d, vinsn_queue_q.issue_cnt=%d, vinsn_queue_q.commit_cnt=%d, vinsn_queue_q.issue_pnt=%d", cnt_oprand_q, vinsn_queue_q.issue_cnt, vinsn_queue_q.commit_cnt, vinsn_queue_q.issue_pnt);
+            $display("[permu_oprand]: lut_mode_i=%d, selIdxVal=%d, operand_valid_i=%d, operand_ready_o=%d", lut_mode_i, selIdxVal, operand_valid_i, operand_ready_o);
+            $display("vinsn_queue_q.issue_cnt=%d, vinsn_queue_q.commit_cnt=%d, vinsn_queue_q.issue_pnt=%d", vinsn_queue_q.issue_cnt, vinsn_queue_q.commit_cnt, vinsn_queue_q.issue_pnt);
             `endif
          end
       end
@@ -282,8 +272,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
                vinsn_queue_d.commit_pnt += 1;
 
             // Reset the operand counter
-            // status_operand_d = '0;
-            cnt_oprand_d = '0;
+            status_operand_d = '0;
             cnt_output_d = '0;
 
             // Reset the shift and mask for index
@@ -307,8 +296,6 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
 
          // Initialize the operand counter
          // status_operand = '0;
-         // cnt_oprand_d = '0;
-         // cnt_output_d = '0;
 
          // Initialize the shift and mask for index
          if(lut_pack_i==VPACK_ON) begin
@@ -338,8 +325,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          vinsn_queue_q           <= '0;
          pe_resp_o               <= '0;
 
-         cnt_oprand_q            <= '0;
-         // status_operand_q        <= '0;
+         status_operand_q        <= '0;
          cnt_output_q            <= '0;
          result_queue_cnt_q      <= '0;
 
@@ -350,8 +336,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          vinsn_queue_q           <= vinsn_queue_d;
          pe_resp_o               <= pe_resp_d;
 
-         cnt_oprand_q            <= cnt_oprand_d;
-         // status_operand_q        <= status_operand_d;
+         status_operand_q        <= status_operand_d;
          cnt_output_q            <= cnt_output_d;
          result_queue_cnt_q      <= result_queue_cnt_d;
 
@@ -410,17 +395,6 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
          end
       end
 
-      // if(result_valid_o) begin
-      //    $display("[permu_deshuffled_result_o] ");
-      //    for(int bank=0; bank<NumBanksPerLane; bank++) begin
-      //       $write("[bank=%d] ", bank);
-      //       for(int lane=0; lane<NumLanes; lane++) begin
-      //          $write("%h ", result_o_deshuffled[bank][lane]);
-      //       end
-      //       $display("");
-      //    end
-      // end
-
       if(&permu_result_req_o) begin
          $display("[permu_shuffled_result_o] ");
          for(int bank=0; bank<NumBanksPerLane; bank++) begin
@@ -431,7 +405,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
             $display("");
          end
 
-         $display("cnt_oprand_q=%d, cnt_output_d=%d, cnt_output_q=%d, vinsn_queue_q.issue_cnt=%d, vinsn_queue_q.commit_cnt=%d, vinsn_queue_q.issue_pnt=%d", cnt_oprand_q, cnt_output_d, cnt_output_q, vinsn_queue_q.issue_cnt, vinsn_queue_q.commit_cnt, vinsn_queue_q.issue_pnt);
+         $display("cnt_output_d=%d, cnt_output_q=%d, vinsn_queue_q.issue_cnt=%d, vinsn_queue_q.commit_cnt=%d, vinsn_queue_q.issue_pnt=%d", cnt_output_d, cnt_output_q, vinsn_queue_q.issue_cnt, vinsn_queue_q.commit_cnt, vinsn_queue_q.issue_pnt);
       end
    end
    `endif
@@ -451,7 +425,7 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
     .io_rshift_idx_bit(rshift_idx_bit_q),
 
     .io_inValid(operand_valid_i),
-    .io_inReady(operand_ready_o),
+    .io_inReady(operand_ready_permu_o),
     .io_inData_0_0(operand_i_deshuffled[0][0]),
     .io_inData_0_1(operand_i_deshuffled[0][1]),
     .io_inData_0_2(operand_i_deshuffled[0][2]),
@@ -484,38 +458,38 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
     .io_inData_3_5(operand_i_deshuffled[3][5]),
     .io_inData_3_6(operand_i_deshuffled[3][6]),
     .io_inData_3_7(operand_i_deshuffled[3][7]),
-    .io_inData_4_0(operand_i_deshuffled[4][0]),
-    .io_inData_4_1(operand_i_deshuffled[4][1]),
-    .io_inData_4_2(operand_i_deshuffled[4][2]),
-    .io_inData_4_3(operand_i_deshuffled[4][3]),
-    .io_inData_4_4(operand_i_deshuffled[4][4]),
-    .io_inData_4_5(operand_i_deshuffled[4][5]),
-    .io_inData_4_6(operand_i_deshuffled[4][6]),
-    .io_inData_4_7(operand_i_deshuffled[4][7]),
-    .io_inData_5_0(operand_i_deshuffled[5][0]),
-    .io_inData_5_1(operand_i_deshuffled[5][1]),
-    .io_inData_5_2(operand_i_deshuffled[5][2]),
-    .io_inData_5_3(operand_i_deshuffled[5][3]),
-    .io_inData_5_4(operand_i_deshuffled[5][4]),
-    .io_inData_5_5(operand_i_deshuffled[5][5]),
-    .io_inData_5_6(operand_i_deshuffled[5][6]),
-    .io_inData_5_7(operand_i_deshuffled[5][7]),
-    .io_inData_6_0(operand_i_deshuffled[6][0]),
-    .io_inData_6_1(operand_i_deshuffled[6][1]),
-    .io_inData_6_2(operand_i_deshuffled[6][2]),
-    .io_inData_6_3(operand_i_deshuffled[6][3]),
-    .io_inData_6_4(operand_i_deshuffled[6][4]),
-    .io_inData_6_5(operand_i_deshuffled[6][5]),
-    .io_inData_6_6(operand_i_deshuffled[6][6]),
-    .io_inData_6_7(operand_i_deshuffled[6][7]),
-    .io_inData_7_0(operand_i_deshuffled[7][0]),
-    .io_inData_7_1(operand_i_deshuffled[7][1]),
-    .io_inData_7_2(operand_i_deshuffled[7][2]),
-    .io_inData_7_3(operand_i_deshuffled[7][3]),
-    .io_inData_7_4(operand_i_deshuffled[7][4]),
-    .io_inData_7_5(operand_i_deshuffled[7][5]),
-    .io_inData_7_6(operand_i_deshuffled[7][6]),
-    .io_inData_7_7(operand_i_deshuffled[7][7]),
+   //  .io_inData_4_0(operand_i_deshuffled[4][0]),
+   //  .io_inData_4_1(operand_i_deshuffled[4][1]),
+   //  .io_inData_4_2(operand_i_deshuffled[4][2]),
+   //  .io_inData_4_3(operand_i_deshuffled[4][3]),
+   //  .io_inData_4_4(operand_i_deshuffled[4][4]),
+   //  .io_inData_4_5(operand_i_deshuffled[4][5]),
+   //  .io_inData_4_6(operand_i_deshuffled[4][6]),
+   //  .io_inData_4_7(operand_i_deshuffled[4][7]),
+   //  .io_inData_5_0(operand_i_deshuffled[5][0]),
+   //  .io_inData_5_1(operand_i_deshuffled[5][1]),
+   //  .io_inData_5_2(operand_i_deshuffled[5][2]),
+   //  .io_inData_5_3(operand_i_deshuffled[5][3]),
+   //  .io_inData_5_4(operand_i_deshuffled[5][4]),
+   //  .io_inData_5_5(operand_i_deshuffled[5][5]),
+   //  .io_inData_5_6(operand_i_deshuffled[5][6]),
+   //  .io_inData_5_7(operand_i_deshuffled[5][7]),
+   //  .io_inData_6_0(operand_i_deshuffled[6][0]),
+   //  .io_inData_6_1(operand_i_deshuffled[6][1]),
+   //  .io_inData_6_2(operand_i_deshuffled[6][2]),
+   //  .io_inData_6_3(operand_i_deshuffled[6][3]),
+   //  .io_inData_6_4(operand_i_deshuffled[6][4]),
+   //  .io_inData_6_5(operand_i_deshuffled[6][5]),
+   //  .io_inData_6_6(operand_i_deshuffled[6][6]),
+   //  .io_inData_6_7(operand_i_deshuffled[6][7]),
+   //  .io_inData_7_0(operand_i_deshuffled[7][0]),
+   //  .io_inData_7_1(operand_i_deshuffled[7][1]),
+   //  .io_inData_7_2(operand_i_deshuffled[7][2]),
+   //  .io_inData_7_3(operand_i_deshuffled[7][3]),
+   //  .io_inData_7_4(operand_i_deshuffled[7][4]),
+   //  .io_inData_7_5(operand_i_deshuffled[7][5]),
+   //  .io_inData_7_6(operand_i_deshuffled[7][6]),
+   //  .io_inData_7_7(operand_i_deshuffled[7][7]),
     .io_outValid(result_valid_o), 
     .io_outReady(result_ready_i), 
     .io_outData_0_0(result_o_deshuffled[0][0]),
@@ -549,39 +523,39 @@ module permu import ara_pkg::*; import rvv_pkg::*; #(
     .io_outData_3_4(result_o_deshuffled[3][4]),
     .io_outData_3_5(result_o_deshuffled[3][5]),
     .io_outData_3_6(result_o_deshuffled[3][6]),
-    .io_outData_3_7(result_o_deshuffled[3][7]),
-    .io_outData_4_0(result_o_deshuffled[4][0]),
-    .io_outData_4_1(result_o_deshuffled[4][1]),
-    .io_outData_4_2(result_o_deshuffled[4][2]),
-    .io_outData_4_3(result_o_deshuffled[4][3]),
-    .io_outData_4_4(result_o_deshuffled[4][4]),
-    .io_outData_4_5(result_o_deshuffled[4][5]),
-    .io_outData_4_6(result_o_deshuffled[4][6]),
-    .io_outData_4_7(result_o_deshuffled[4][7]),
-    .io_outData_5_0(result_o_deshuffled[5][0]),
-    .io_outData_5_1(result_o_deshuffled[5][1]),
-    .io_outData_5_2(result_o_deshuffled[5][2]),
-    .io_outData_5_3(result_o_deshuffled[5][3]),
-    .io_outData_5_4(result_o_deshuffled[5][4]),
-    .io_outData_5_5(result_o_deshuffled[5][5]),
-    .io_outData_5_6(result_o_deshuffled[5][6]),
-    .io_outData_5_7(result_o_deshuffled[5][7]),
-    .io_outData_6_0(result_o_deshuffled[6][0]),
-    .io_outData_6_1(result_o_deshuffled[6][1]),
-    .io_outData_6_2(result_o_deshuffled[6][2]),
-    .io_outData_6_3(result_o_deshuffled[6][3]),
-    .io_outData_6_4(result_o_deshuffled[6][4]),
-    .io_outData_6_5(result_o_deshuffled[6][5]),
-    .io_outData_6_6(result_o_deshuffled[6][6]),
-    .io_outData_6_7(result_o_deshuffled[6][7]),
-    .io_outData_7_0(result_o_deshuffled[7][0]),
-    .io_outData_7_1(result_o_deshuffled[7][1]),
-    .io_outData_7_2(result_o_deshuffled[7][2]),
-    .io_outData_7_3(result_o_deshuffled[7][3]),
-    .io_outData_7_4(result_o_deshuffled[7][4]),
-    .io_outData_7_5(result_o_deshuffled[7][5]),
-    .io_outData_7_6(result_o_deshuffled[7][6]),
-    .io_outData_7_7(result_o_deshuffled[7][7])
+    .io_outData_3_7(result_o_deshuffled[3][7])
+   //  .io_outData_4_0(result_o_deshuffled[4][0]),
+   //  .io_outData_4_1(result_o_deshuffled[4][1]),
+   //  .io_outData_4_2(result_o_deshuffled[4][2]),
+   //  .io_outData_4_3(result_o_deshuffled[4][3]),
+   //  .io_outData_4_4(result_o_deshuffled[4][4]),
+   //  .io_outData_4_5(result_o_deshuffled[4][5]),
+   //  .io_outData_4_6(result_o_deshuffled[4][6]),
+   //  .io_outData_4_7(result_o_deshuffled[4][7]),
+   //  .io_outData_5_0(result_o_deshuffled[5][0]),
+   //  .io_outData_5_1(result_o_deshuffled[5][1]),
+   //  .io_outData_5_2(result_o_deshuffled[5][2]),
+   //  .io_outData_5_3(result_o_deshuffled[5][3]),
+   //  .io_outData_5_4(result_o_deshuffled[5][4]),
+   //  .io_outData_5_5(result_o_deshuffled[5][5]),
+   //  .io_outData_5_6(result_o_deshuffled[5][6]),
+   //  .io_outData_5_7(result_o_deshuffled[5][7]),
+   //  .io_outData_6_0(result_o_deshuffled[6][0]),
+   //  .io_outData_6_1(result_o_deshuffled[6][1]),
+   //  .io_outData_6_2(result_o_deshuffled[6][2]),
+   //  .io_outData_6_3(result_o_deshuffled[6][3]),
+   //  .io_outData_6_4(result_o_deshuffled[6][4]),
+   //  .io_outData_6_5(result_o_deshuffled[6][5]),
+   //  .io_outData_6_6(result_o_deshuffled[6][6]),
+   //  .io_outData_6_7(result_o_deshuffled[6][7]),
+   //  .io_outData_7_0(result_o_deshuffled[7][0]),
+   //  .io_outData_7_1(result_o_deshuffled[7][1]),
+   //  .io_outData_7_2(result_o_deshuffled[7][2]),
+   //  .io_outData_7_3(result_o_deshuffled[7][3]),
+   //  .io_outData_7_4(result_o_deshuffled[7][4]),
+   //  .io_outData_7_5(result_o_deshuffled[7][5]),
+   //  .io_outData_7_6(result_o_deshuffled[7][6]),
+   //  .io_outData_7_7(result_o_deshuffled[7][7])
    );
 
 endmodule

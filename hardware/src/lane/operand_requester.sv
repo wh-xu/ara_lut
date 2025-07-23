@@ -38,6 +38,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     output elen_t                [NrBanks-1:0]         vrf_wdata_o,
     output strb_t                [NrBanks-1:0]         vrf_be_o,
     output opqueue_e             [NrBanks-1:0]         vrf_tgt_opqueue_o,
+    input  logic                 [NrBanks-1:0]         vrf_gnt_i,
     // Interface with the operand queues
     input  logic                 [NrOperandQueues-1:0] operand_queue_ready_i,
     output logic                 [NrOperandQueues-1:0] operand_issued_o,
@@ -711,11 +712,10 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .data_i ({payload_lp, payload_hp}         ),
       .req_i  ({payload_lp_req, payload_hp_req} ),
       .gnt_o  ({payload_lp_gnt, payload_hp_gnt} ),
-      .data_o ({vrf_addr_o[bank], vrf_wen_o[bank], vrf_wdata_o[bank], vrf_be_o[bank],
-          vrf_tgt_opqueue_o[bank]}),
+      .data_o ({vrf_addr_o[bank], vrf_wen_o[bank], vrf_wdata_o[bank], vrf_be_o[bank], vrf_tgt_opqueue_o[bank]}),
       .idx_o (/* Unused */    ),
       .req_o (vrf_req_o[bank] ),
-      .gnt_i (vrf_req_o[bank] ) // Acknowledge it directly
+      .gnt_i (vrf_gnt_i[bank] ) // Acknowledge from the lower arbiter
     );
   
 

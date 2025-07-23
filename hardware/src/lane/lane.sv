@@ -112,7 +112,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     output elen_t [NrVRFBanksPerLane-1:0]                  permu_operand_o,
     output logic                                           permu_sel_idx_val_o,
     output logic                                           permu_operand_valid_o,
-    input  logic                                           permu_operand_ready_i,
+    input  logic [1:0]                                     permu_operand_ready_i,
     // Returned results from parallel LUT
     input  logic                                           permu_result_req_i,
     input  vid_t                                           permu_result_id_i,
@@ -311,6 +311,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   elen_t              [NrVRFBanksPerLane-1:0] vrf_wdata_generic;
   strb_t              [NrVRFBanksPerLane-1:0] vrf_be_generic;
   opqueue_e           [NrVRFBanksPerLane-1:0] vrf_tgt_opqueue_generic;
+  logic               [NrVRFBanksPerLane-1:0] vrf_gnt_generic;
 
   // Interface with the operand queues
   logic               [NrOperandQueues-1:0]   operand_queue_ready;
@@ -365,6 +366,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .vrf_wdata_o              (vrf_wdata_generic       ),
     .vrf_be_o                 (vrf_be_generic          ),
     .vrf_tgt_opqueue_o        (vrf_tgt_opqueue_generic ),
+    .vrf_gnt_i                (vrf_gnt_generic         ),
     // Interface with the operand queues
     .operand_issued_o         (operand_issued          ),
     .operand_queue_ready_i    (operand_queue_ready     ),
@@ -491,7 +493,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   // Instantiate a RR arbiter per bank
   // Generic VRF should have higher priority than PERMU
-  logic vrf_gnt_generic, permu_gnt, tmp_gnt;
+  logic generic_gnt, permu_gnt, tmp_gnt;
   rr_arb_tree #(
     .NumIn    (2               ),
     .DataWidth($bits(payload_t)),
@@ -504,12 +506,14 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .rr_i   (1'b0                             ),
     .data_i ({payload_generic, payload_permu} ),
     .req_i  ({|vrf_req_generic, |permu_result_req_i} ),
-    .gnt_o  ({vrf_gnt_generic, permu_gnt} ),
+    .gnt_o  ({generic_gnt, permu_gnt} ),
     .data_o ({vrf_req, vrf_addr, vrf_wen, vrf_wdata, vrf_be, vrf_tgt_opqueue}),
     .idx_o (/* Unused */    ),
     .req_o (tmp_gnt),
     .gnt_i (tmp_gnt) // Acknowledge it directly
   );
+  // Acknowledge the arbiter requests
+  assign vrf_gnt_generic = vrf_req_generic & {NrVRFBanksPerLane{generic_gnt}};
   assign permu_result_gnt_o = {{NrVRFBanksPerLane{permu_gnt}}};
   /////////////////////////////////////////
   /////////////////////////////////////////
