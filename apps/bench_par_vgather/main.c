@@ -42,68 +42,19 @@
 #include "runtime.h"
 
 #include <riscv_vector.h>
+#include "rvv_def.h"
 
-#define N 4096
-
-enum vlmul{
-    VLMUL1_8 = 0x5,
-    VLMUL1_4 = 0x6,
-    VLMUL1_2 = 0x7,
-    VLMUL1 = 0x0,
-    VLMUL2 = 0x1,
-    VLMUL4 = 0x2,
-    VLMUL8 = 0x3,
-};
-
-enum vsew{
-    VSEW8 = 0x0,
-    VSEW16 = 0x1,
-    VSEW32 = 0x2,
-    VSEW64 = 0x3,
-};
-
-enum vma{
-    VMA_U = 0x0,
-    VMA_A = 0x1,
-};
-
-enum vta{
-    VTA_U = 0x0,
-    VTA_A = 0x1,
-};
-
-enum vlut_type{
-    CBSEQ   = 0x0,
-    CB16    = 0x1,
-    CB32    = 0x2,
-    CB64    = 0x3,
-    CB128   = 0x4,
-    CB256   = 0x5,
-};
-
-enum vreuse{
-    VREUSE_OFF = 0x0,
-    VREUSE_ON  = 0x1,
-};
-
-uint32_t get_vsetvl_cfg(uint8_t vsew, uint8_t vlmul, uint8_t vma, uint8_t vta, uint8_t vlut, uint8_t vreuse){
-    uint32_t cfg = 0;
-    cfg |= vlmul;
-    cfg |= (vsew << 3);
-    cfg |= (vta << 6);
-    cfg |= (vma << 7);
-    cfg |= (vlut << 8);
-    cfg |= (vreuse << 11);
-    return cfg;
-}
 
 int main(){
-    int n_runs = 5;
-    const uint16_t vl = 256;
+    const uint16_t vl = 512;
+    const uint8_t start_cb = CB4;
+    const uint8_t end_cb = CB4;
+    const uint8_t start_vmul = VLMUL8;
+    const uint8_t end_vmul = VLMUL8;
+    const uint8_t lut_pack = VPACK_ON;
 
     // Init test data
-    uint16_t buf_idx[vl];
-    int16_t buf_val[vl], buf_res[vl];
+    uint16_t buf_idx[vl], buf_idx2[vl], buf_val[vl], buf_res[vl*8];
     
     static uint32_t seed = 12345;
     for(uint16_t i=0; i<vl; i++){
@@ -111,33 +62,66 @@ int main(){
         // seed = seed * 1103515245 + 12345;
         // buf_idx[i] = ((seed >> 16) & 0xFFFF) % 16;
         buf_idx[i] = (i+2) % 16;
+        buf_idx2[i] = (i+3) % 16;
         buf_val[i] = i+1;
     }
 
-    // Set vector length
-    uint32_t cfg;
-    // cfg = get_vsetvl_cfg(VSEW16, VLMUL1, VMA_A, VTA_A, CBSEQ, VREUSE_OFF);
-    // cfg = get_vsetvl_cfg(VSEW16, VLMUL1, VMA_A, VTA_A, CB16, VREUSE_OFF);
-    cfg = get_vsetvl_cfg(VSEW16, VLMUL1, VMA_A, VTA_A, CB16, VREUSE_ON);
-    asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg));
+    // Init loading and config
+    uint32_t cfg_load, cfg_exec, cfg_agg;
+    cfg_load = get_vsetvl_cfg(VSEW16, VLMUL1, VMA_A, VTA_A, CBSEQ, VPACK_OFF);
+    asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_load));
+    asm volatile("vle16.v v0, (%0);" ::"r"(buf_val));
+    asm volatile("vle16.v v8, (%0);" ::"r"(buf_idx));
 
-    // load/store
-    asm volatile("vle16.v v4, (%0);" ::"r"(buf_idx));
-    asm volatile("vle16.v v8, (%0);" ::"r"(buf_val));
+    //
+    int n_lut_per_run;
+    for(int cb=start_cb; cb<=end_cb; cb++) {
+        for(int vmul=start_vmul; vmul<=end_vmul; vmul++) {
+            n_lut_per_run = cb==0 ? 10: 10; // Reduce sim time for slow seq lookup
 
-    start_timer();
+            cfg_exec = get_vsetvl_cfg(VSEW16, VLMUL1, VMA_A, VTA_A, CBSEQ+cb, lut_pack);
+            cfg_agg = get_vsetvl_cfg(VSEW16, vmul, VMA_A, VTA_A, CBSEQ+cb, lut_pack);
 
-    for(int i=0; i<n_runs; i++){
-        asm volatile("vle16.v v8, (%0);" ::"r"(buf_val));
-        asm volatile("vrgatherei16.vv v10, v8, v4;"); 
+            // TODO: First clear REG before execution
+
+            start_timer();
+
+            // Case 1: sequential loading
+            // for(int j=0; j<n_lut_per_run; j++) {
+            //     asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_exec));
+            //     asm volatile("vle16.v v8, (%0);" ::"r"(buf_idx));
+            //     asm volatile("vrgatherei16.vv v16, v0, v8;"); 
+
+            //     asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_agg));
+            //     asm volatile("vadd.vv v24, v16, v24;"); 
+            // }
+
+            // Case 2: pipelined loading
+            for(int j=0; j<n_lut_per_run; j++) {
+                asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_exec));
+
+                asm volatile("vle16.v v1, (%0);" ::"r"(buf_idx));
+                asm volatile("vrgatherei16.vv v8, v0, v1;"); 
+
+                asm volatile("vle16.v v2, (%0);" ::"r"(buf_idx2));
+                asm volatile("vrgatherei16.vv v16, v0, v2;"); 
+
+                asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_agg));
+                asm volatile("vadd.vv v24, v24, v8;"); 
+                asm volatile("vadd.vv v24, v24, v16;"); 
+            }
+
+            stop_timer();
+
+            uint64_t runtime = get_timer();
+            printf("\nThe execution took %d cycles.\n", runtime);
+            int lut_per_elem = lut_pack? 16/(cb+1) : 1;
+            double tp_per_cycle = (double) n_lut_per_run * vl * lut_per_elem / (double)runtime;
+            double tp_giga_per_sec = tp_per_cycle * 1.25;
+            printf("Throughput: %.2f luts/cycle for CB%d and VLMUL%d with %d luts/elem\n", tp_per_cycle, 2<<cb, 1<<vmul, lut_per_elem);
+            printf("Throughput: %.2f G luts/sec for CB%d and VLMUL%d\n", tp_giga_per_sec, 2<<cb, 1<<vmul);
+        }
     }
-
-    stop_timer();
-
-    uint64_t runtime = get_timer();
-    double throughput = (double)n_runs * vl / (double)runtime;
-    printf("\n\nThe execution took %d cycles.\n", runtime);
-    printf("Throughput: %.2f elements/cycle\n", throughput);
     
 
     #ifdef SPIKE
@@ -155,7 +139,8 @@ int main(){
     }
     #endif
 
-    asm volatile("vse16.v v10, (%0);" ::"r"(buf_res));
+    // asm volatile("vsetvl a0, %0, %1" ::"r"(vl), "r"(cfg_load));
+    asm volatile("vse16.v v24, (%0);" ::"r"(buf_res));
     printf("\n\nRes:\t");
     for(int i=0; i<5; i++){
         printf("%d ", buf_res[i]);
