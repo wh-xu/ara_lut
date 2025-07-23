@@ -385,8 +385,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_operand_lane_o;
   logic  [NrLanes-1:0]                         permu_sel_idx_val_lane_o;
   logic  [NrLanes-1:0]                         permu_operand_valid_lane_o;
-  logic  [NrLanes-1:0]                         permu_operand_ready_lane_i;
-  // logic  [1:0][NrLanes-1:0]                    permu_operand_ready_lane_i;
+  logic  [1:0][NrLanes-1:0]                    permu_operand_ready_lane_i;
 
   logic     [NrLanes-1:0]                      permu_result_req;
   vid_t     [NrLanes-1:0]                      permu_result_id;
@@ -480,7 +479,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
       .permu_operand_o                 (permu_operand_lane_o[lane]          ),
       .permu_sel_idx_val_o             (permu_sel_idx_val_lane_o[lane]      ),
       .permu_operand_valid_o           (permu_operand_valid_lane_o[lane]    ),
-      .permu_operand_ready_i           (permu_operand_ready_lane_i[lane]    ),
+      .permu_operand_ready_i           (permu_operand_ready_lane_i    ),
 
       .permu_result_req_i              (permu_result_req[lane]              ),
       .permu_result_id_i               (permu_result_id[lane]               ),
@@ -495,7 +494,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   ///////////////////////////////
 
   logic  permu_operand_valid_i;
-  logic  permu_operand_ready_o;
+  logic  [1:0] permu_operand_ready_o;
 
   permu #(
     .NumLanes(NrLanes),
@@ -530,7 +529,7 @@ module ara import ara_pkg::*; import rvv_pkg::*; #(
   );
 
   assign permu_operand_valid_i = |permu_operand_valid_lane_o;
-  assign permu_operand_ready_lane_i = {NrLanes{permu_operand_ready_o}};
+  assign permu_operand_ready_lane_i = permu_operand_ready_o;
 
 
   //////////////////////////////
