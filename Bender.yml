@@ -32,6 +32,8 @@ sources:
     # Sources
     # Level 0
     - hardware/src/segment_sequencer.sv
+    - hardware/src/permu/permu.sv
+    - hardware/src/permu/SimdPermutation.sv
     # Level 1
     - hardware/src/ctrl_registers.sv
     - hardware/src/cva6_accel_first_pass_decoder.sv
@@ -40,6 +42,7 @@ sources:
     - hardware/src/axi_inval_filter.sv
     - hardware/src/lane/lane_sequencer.sv
     - hardware/src/lane/operand_queue.sv
+    - hardware/src/lane/operand_permu_queue.sv
     - hardware/src/lane/operand_requester.sv
     - hardware/src/lane/simd_alu.sv
     - hardware/src/lane/simd_div.sv

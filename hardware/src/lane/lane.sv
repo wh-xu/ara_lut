@@ -61,6 +61,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     output logic                                           alu_vinsn_done_o,
     output logic                                           mfpu_vinsn_done_o,
     input  logic                [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_i,
+    input  logic                [NrVInsn-1:0]              permu_active_table_i,
     // Interface with the Store unit
     output elen_t                                          stu_operand_o,
     output logic                                           stu_operand_valid_o,
@@ -106,7 +107,18 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     // Interface between the Mask unit and the VFUs
     input  strb_t                                          mask_i,
     input  logic                                           mask_valid_i,
-    output logic                                           mask_ready_o
+    output logic                                           mask_ready_o,
+    // Operands for parallel LUT
+    output elen_t [NrVRFBanksPerLane-1:0]                  permu_operand_o,
+    output logic                                           permu_sel_idx_val_o,
+    output logic                                           permu_operand_valid_o,
+    input  logic [1:0]                                     permu_operand_ready_i,
+    // Returned results from parallel LUT
+    input  logic                                           permu_result_req_i,
+    input  vid_t                                           permu_result_id_i,
+    input  vaddr_t                                         permu_result_addr_i,
+    input  elen_t [NrVRFBanksPerLane-1:0]                  permu_result_wdata_i,
+    output logic                                           permu_result_gnt_o
   );
 
   `include "common_cells/registers.svh"
@@ -142,6 +154,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
     // Hazards
     logic [NrVInsn-1:0] hazard;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } operand_request_cmd_t;
 
   typedef struct packed {
@@ -182,6 +197,9 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     vlen_t vl;
     vlen_t vstart;
     rvv_pkg::vtype_t vtype;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } vfu_operation_t;
 
   /////////////////
@@ -286,6 +304,15 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   elen_t              [NrVRFBanksPerLane-1:0] vrf_wdata;
   strb_t              [NrVRFBanksPerLane-1:0] vrf_be;
   opqueue_e           [NrVRFBanksPerLane-1:0] vrf_tgt_opqueue;
+  // Temp for the arbiter
+  logic               [NrVRFBanksPerLane-1:0] vrf_req_generic;
+  vaddr_t             [NrVRFBanksPerLane-1:0] vrf_addr_generic;
+  logic               [NrVRFBanksPerLane-1:0] vrf_wen_generic;
+  elen_t              [NrVRFBanksPerLane-1:0] vrf_wdata_generic;
+  strb_t              [NrVRFBanksPerLane-1:0] vrf_be_generic;
+  opqueue_e           [NrVRFBanksPerLane-1:0] vrf_tgt_opqueue_generic;
+  logic               [NrVRFBanksPerLane-1:0] vrf_gnt_generic;
+
   // Interface with the operand queues
   logic               [NrOperandQueues-1:0]   operand_queue_ready;
   logic               [NrOperandQueues-1:0]   operand_issued;
@@ -324,6 +351,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .rst_ni                   (rst_ni                  ),
     // Interface with the main sequencer
     .global_hazard_table_i    (global_hazard_table_i   ),
+    .permu_active_table_i     (permu_active_table_i    ),
     // Interface with the lane sequencer
     .operand_request_i        (operand_request         ),
     .operand_request_valid_i  (operand_request_valid   ),
@@ -332,12 +360,13 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .lsu_ex_flush_i           (lsu_ex_flush_op_req_q   ),
     .lsu_ex_flush_o           (lsu_ex_flush_op_queues_d),
     // Interface with the VRF
-    .vrf_req_o                (vrf_req                 ),
-    .vrf_addr_o               (vrf_addr                ),
-    .vrf_wen_o                (vrf_wen                 ),
-    .vrf_wdata_o              (vrf_wdata               ),
-    .vrf_be_o                 (vrf_be                  ),
-    .vrf_tgt_opqueue_o        (vrf_tgt_opqueue         ),
+    .vrf_req_o                (vrf_req_generic         ),
+    .vrf_addr_o               (vrf_addr_generic        ),
+    .vrf_wen_o                (vrf_wen_generic         ),
+    .vrf_wdata_o              (vrf_wdata_generic       ),
+    .vrf_be_o                 (vrf_be_generic          ),
+    .vrf_tgt_opqueue_o        (vrf_tgt_opqueue_generic ),
+    .vrf_gnt_i                (vrf_gnt_generic         ),
     // Interface with the operand queues
     .operand_issued_o         (operand_issued          ),
     .operand_queue_ready_i    (operand_queue_ready     ),
@@ -384,6 +413,16 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .ldu_result_final_gnt_o   (ldu_result_final_gnt_o  )
   );
 
+  `ifdef DEBUG
+  always @(posedge clk_i) begin
+    for(int i=0; i<NrOperandQueues; i++) begin
+      if(operand_request_valid[i] && operand_request_ready[i]) begin
+        $display("[LANE] queue-%d operand_request: id=%d, vs=%d, hazard=%b, lut_mode=%h, vstart=%d, vl=%d, target_fu=%h", i, operand_request[i].id, operand_request[i].vs, operand_request[i].hazard, operand_request[i].lut_mode, operand_request[i].vstart, operand_request[i].vl, operand_request[i].target_fu);
+      end
+    end
+  end
+  `endif
+
   ////////////////////////////
   //  Vector Register File  //
   ////////////////////////////
@@ -391,6 +430,10 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
   // Interface with the operand queues
   elen_t [NrOperandQueues-1:0] vrf_operand;
   logic  [NrOperandQueues-1:0] vrf_operand_valid;
+
+  elen_t [NrVRFBanksPerLane-1:0] permu_operand_vrf;
+  logic                          permu_operand_vrf_valid;
+  opqueue_e                      permu_operand_vrf_opqueue;
 
   vector_regfile #(
     .VRFSize(VRFSizePerLane   ),
@@ -408,8 +451,99 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     .tgt_opqueue_i  (vrf_tgt_opqueue  ),
     // Interface with the operand queues
     .operand_o      (vrf_operand      ),
-    .operand_valid_o(vrf_operand_valid)
+    .operand_valid_o(vrf_operand_valid),
+    // Operands for parallel LUT
+    .operand_permu_o          (permu_operand_vrf        ),
+    .operand_permu_valid_o    (permu_operand_vrf_valid  ),
+    .operand_permu_opqueue_o  (permu_operand_vrf_opqueue)
   );
+
+
+  /////////////////////////////////////////
+  // Add a last-level arbiter for PERMU  //
+  /////////////////////////////////////////
+
+  typedef struct packed {
+    logic     [NrVRFBanksPerLane-1:0] req;
+    vaddr_t   [NrVRFBanksPerLane-1:0] addr;
+    logic     [NrVRFBanksPerLane-1:0] wen;
+    elen_t    [NrVRFBanksPerLane-1:0] wdata;
+    strb_t    [NrVRFBanksPerLane-1:0] be;
+    opqueue_e [NrVRFBanksPerLane-1:0] opqueue;
+  } payload_t;
+
+  payload_t payload_generic;
+  assign payload_generic = '{
+    req: vrf_req_generic,
+    addr: vrf_addr_generic,
+    wen: vrf_wen_generic,
+    wdata: vrf_wdata_generic,
+    be: vrf_be_generic,
+    opqueue: vrf_tgt_opqueue_generic};
+ 
+  // This is for write-back op
+  payload_t payload_permu;
+  assign payload_permu = '{
+    req: {NrVRFBanksPerLane{permu_result_req_i}},
+    addr: {NrVRFBanksPerLane{permu_result_addr_i}},
+    wen: {NrVRFBanksPerLane{permu_result_req_i}},
+    wdata: permu_result_wdata_i,
+    be: '1,
+    opqueue: {NrVRFBanksPerLane{PermVal}}};
+
+  // Instantiate a RR arbiter per bank
+  // Generic VRF should have higher priority than PERMU
+  logic generic_gnt, permu_gnt, tmp_gnt;
+  rr_arb_tree #(
+    .NumIn    (2               ),
+    .DataWidth($bits(payload_t)),
+    .AxiVldRdy(1'b0            ),
+    .ExtPrio  (1'b1            )
+  ) i_vrf_arbiter (
+    .clk_i  (clk_i                            ),
+    .rst_ni (rst_ni                           ),
+    .flush_i(1'b0                             ),
+    .rr_i   (1'b0                             ),
+    .data_i ({payload_generic, payload_permu} ),
+    .req_i  ({|vrf_req_generic, |permu_result_req_i} ),
+    .gnt_o  ({generic_gnt, permu_gnt} ),
+    .data_o ({vrf_req, vrf_addr, vrf_wen, vrf_wdata, vrf_be, vrf_tgt_opqueue}),
+    .idx_o (/* Unused */    ),
+    .req_o (tmp_gnt),
+    .gnt_i (tmp_gnt) // Acknowledge it directly
+  );
+  // Acknowledge the arbiter requests
+  assign vrf_gnt_generic = vrf_req_generic & {NrVRFBanksPerLane{generic_gnt}};
+  assign permu_result_gnt_o = {{NrVRFBanksPerLane{permu_gnt}}};
+  /////////////////////////////////////////
+  /////////////////////////////////////////
+
+  `ifdef DEBUG
+  // Display vrgat_req_d for debugging
+  always @(posedge clk_i) begin
+    if(&vrf_req && &(~vrf_wen)) begin
+      $display("[VRF]lane-%d permu_operand read from vrf_addr=%h with vrf_tgt_opqueue=%h, vrf_gnt_generic=%b, permu_gnt=%b", lane_id_i, vrf_addr[0], vrf_tgt_opqueue[0], vrf_gnt_generic, permu_gnt);
+    end else if (&vrf_req && &vrf_wen) begin
+       $display("[VRF]lane-%d permu_operand write to vrf_addr=%h", lane_id_i, vrf_addr[0]);
+      // for(int i=0; i<NrVRFBanksPerLane/2; i++) begin
+      //   $write("%h ", vrf_wdata[i]);
+      // end
+      // $display("");
+    end else if (|vrf_req && !(&vrf_req)) begin
+      for(int i=0; i<NrVRFBanksPerLane; i++) begin
+        if(vrf_req[i] && vrf_wen[i]) begin
+          $display("[VRF]lane-%d generic write to vrf_addr=%h @ bank-%d: wdata=%h", lane_id_i, vrf_addr[i], i, vrf_wdata[i]);
+        end
+
+        if(vrf_req[i] && !vrf_wen[i]) begin
+          $display("[VRF]lane-%d generic read from vrf_addr=%h @ bank-%d", lane_id_i, vrf_addr[i], i);
+        end
+      end
+    end else if (|vrf_req) begin
+      $display("[VRF]lane-%d IO exception: vrf_req=%h, vrf_addr=%h, vrf_wen=%h, vrf_be=%h, vrf_tgt_opqueue=%h", lane_id_i, vrf_req, vrf_addr, vrf_wen, vrf_be, vrf_tgt_opqueue);
+    end
+  end
+  `endif
 
   //////////////////////
   //  Operand queues  //
@@ -434,6 +568,7 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
 
   operand_queues_stage #(
     .NrLanes            (NrLanes            ),
+    .NrVRFBanksPerLane  (NrVRFBanksPerLane  ),
     .VLEN               (VLEN               ),
     .FPUSupport         (FPUSupport         ),
     .operand_queue_cmd_t(operand_queue_cmd_t)
@@ -477,7 +612,15 @@ module lane import ara_pkg::*; import rvv_pkg::*; #(
     // Mask Unit
     .mask_operand_o                   (mask_operand_o[1:0]                ),
     .mask_operand_valid_o             (mask_operand_valid_o[1:0]          ),
-    .mask_operand_ready_i             (mask_operand_ready_i[1:0]          )
+    .mask_operand_ready_i             (mask_operand_ready_i[1:0]          ),
+    // Parallel Perm. Unit
+    .permu_operand_i                   (permu_operand_vrf                 ),
+    .permu_operand_valid_i             (permu_operand_vrf_valid           ),
+    .permu_operand_opqueue_i           (permu_operand_vrf_opqueue         ),
+    .permu_operand_o                   (permu_operand_o                   ),
+    .permu_sel_idx_val_o               (permu_sel_idx_val_o               ),
+    .permu_operand_valid_o             (permu_operand_valid_o             ),
+    .permu_operand_ready_i             (permu_operand_ready_i             )
   );
 
   ///////////////////////////////

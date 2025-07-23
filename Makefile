@@ -132,10 +132,7 @@ ${ISA_SIM_INSTALL_DIR}: Makefile
 	# make riscv-isa-sim LDFLAGS="-static-libstdc++"
 	# Spike was compiled successfully using gcc and g++ version 7.2.0.
 	cd toolchain/riscv-isa-sim && rm -rf build && mkdir -p build && cd build; \
-	make install SETUP_PREFIX=$(ISA_SIM_INSTALL_DIR) PREFIX=$(ISA_SIM_INSTALL_DIR) && \
-	PATH=$(ISA_SIM_INSTALL_DIR)/bin:$$PATH; cd ..; \
-	../configure --prefix=$(ISA_SIM_INSTALL_DIR) \
-	--without-boost --without-boost-asio --without-boost-regex && \
+	../configure --prefix=$(ISA_SIM_INSTALL_DIR) && \
 	make -j32 && make install
 
 # Verilator

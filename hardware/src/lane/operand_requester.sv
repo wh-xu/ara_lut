@@ -23,6 +23,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     input  logic                                       rst_ni,
     // Interface with the main sequencer
     input  logic            [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table_i,
+    input  logic            [NrVInsn-1:0]              permu_active_table_i,
     // Interface with the lane sequencer
     input  operand_request_cmd_t [NrOperandQueues-1:0] operand_request_i,
     input  logic                 [NrOperandQueues-1:0] operand_request_valid_i,
@@ -37,6 +38,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     output elen_t                [NrBanks-1:0]         vrf_wdata_o,
     output strb_t                [NrBanks-1:0]         vrf_be_o,
     output opqueue_e             [NrBanks-1:0]         vrf_tgt_opqueue_o,
+    input  logic                 [NrBanks-1:0]         vrf_gnt_i,
     // Interface with the operand queues
     input  logic                 [NrOperandQueues-1:0] operand_queue_ready_i,
     output logic                 [NrOperandQueues-1:0] operand_issued_o,
@@ -156,6 +158,32 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     .ready_i   (masku_result_gnt                                                                 )
   );
 
+  // Permutation unit
+  // typedef struct packed {
+  //   vid_t id;
+  //   vaddr_t addr;
+  //   elen_t [NrVRFBanksPerLane-1:0] wdata;
+  // } permu_stream_register_payload_t;
+
+  // vid_t   permu_result_id;
+  // vaddr_t permu_result_addr;
+  // elen_t [NrVRFBanksPerLane-1:0] permu_result_wdata;
+  // logic   permu_result_req;
+  // logic   permu_result_gnt;
+  // stream_register #(.T(permu_stream_register_payload_t)) i_permu_stream_register (
+  //   .clk_i     (clk_i                                                                            ),
+  //   .rst_ni    (rst_ni                                                                           ),
+  //   .clr_i     (1'b0                                                                             ),
+  //   .testmode_i(1'b0                                                                             ),
+  //   .data_i    ({permu_result_id_i, permu_result_addr_i, permu_result_wdata_i}),
+  //   .valid_i   (permu_result_req_i                                                               ),
+  //   .ready_o   (permu_result_gnt_o                                                               ),
+  //   .data_o    ({permu_result_id, permu_result_addr, permu_result_wdata}        ),
+  //   .valid_o   (permu_result_req                                                                 ),
+  //   .ready_i   (permu_result_gnt                                                                 )
+  // );
+
+
   // The very last grant must happen when the instruction actually write in the VRF
   // Otherwise the dependency is freed in advance
   always_ff @(posedge clk_i or negedge rst_ni) begin : p_final_gnts
@@ -187,11 +215,16 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     vinsn_result_written_d = '0;
 
     // Which vector instructions are writing something?
-    vinsn_result_written_d[alu_result_id_i] |= alu_result_gnt_o;
-    vinsn_result_written_d[mfpu_result_id_i] |= mfpu_result_gnt_o;
-    vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
-    vinsn_result_written_d[ldu_result_id] |= ldu_result_gnt;
-    vinsn_result_written_d[sldu_result_id] |= sldu_result_gnt;
+    // TODO: this needs to be disabled when the PERMU is active
+    // if(~(|permu_active_table_i)) begin
+    if(0) begin
+      vinsn_result_written_d[alu_result_id_i] |= alu_result_gnt_o;
+      vinsn_result_written_d[mfpu_result_id_i] |= mfpu_result_gnt_o;
+      vinsn_result_written_d[masku_result_id] |= masku_result_gnt;
+      vinsn_result_written_d[ldu_result_id] |= ldu_result_gnt;
+      vinsn_result_written_d[sldu_result_id] |= sldu_result_gnt;
+      // vinsn_result_written_d[permu_result_id] |= permu_result_gnt;
+    end
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin: p_vinsn_result_written_ff
@@ -218,7 +251,8 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
   // A set bit indicates that the the master q is requesting access to the bank b
   // Masters 0 to NrOperandQueues-1 correspond to the operand queues.
   // The remaining four masters correspond to the ALU, the MFPU, the MASKU, the VLDU, and the SLDU.
-  localparam NrGlobalMasters = 5;
+  // The last master corresponds to the PERMU.
+  localparam NrGlobalMasters = 5+1;
   localparam NrMasters = NrOperandQueues + NrGlobalMasters;
 
   typedef struct packed {
@@ -255,6 +289,9 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic is_widening;
     // One-bit counters
     logic [NrVInsn-1:0] waw_hazard_counter;
+
+    // Lookup table configs
+    rvv_pkg::vlut_e lut_mode;
   } requester_metadata_t;
 
   for (genvar b = 0; b < NrBanks; b++) begin
@@ -327,6 +364,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         scaled_vector_len_elements += 1;
 
       // Final computed length
+      // TODO: modify based on lut_mode 
       effective_vector_body_length = (operand_request_i[requester_index].scale_vl)
                                    ? scaled_vector_len_elements
                                    : operand_request_i[requester_index].vl;
@@ -337,6 +375,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       vrf_addr = vaddr(operand_request_i[requester_index].vs, NrLanes, VLEN)
                + (operand_request_i[requester_index].vstart >>
                    (unsigned'(EW64) - unsigned'(operand_request_i[requester_index].eew)));
+
       // Init helper variables
       requester_metadata_tmp = '{
         id          : operand_request_i[requester_index].id,
@@ -345,6 +384,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
         vew         : operand_request_i[requester_index].eew,
         hazard      : operand_request_i[requester_index].hazard,
         is_widening : operand_request_i[requester_index].cvt_resize == CVT_WIDE,
+        lut_mode    : operand_request_i[requester_index].lut_mode,
         default: '0
       };
       operand_queue_cmd_tmp = '{
@@ -400,9 +440,20 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
           if (operand_queue_ready_i[requester_index]) begin
             automatic vlen_t num_elements;
-
             // Operand request
-            lane_operand_req_transposed[requester_index][bank] = !stall;
+            // TODO: activate all banks
+            if(requester_metadata_q.lut_mode > rvv_pkg::CBSEQ) begin
+              lane_operand_req_transposed[requester_index] = {NrBanks{!stall}};
+
+              // `ifdef DEBUG
+              // if(requester_index == PermVal) begin
+              //   $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
+              // end
+              // `endif
+            end else begin
+              lane_operand_req_transposed[requester_index][bank] = !stall;
+
+            end
             operand_payload[requester_index]   = '{
               addr   : requester_metadata_q.addr >> $clog2(NrBanks),
               opqueue: opqueue_e'(requester_index),
@@ -411,11 +462,24 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
 
             // Received a grant.
             if (|operand_requester_gnt) begin : op_req_grant
-              // Bump the address pointer
-              requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;
+              if (requester_metadata_q.lut_mode > rvv_pkg::CBSEQ) begin
+                // Bump addr pointer based on lut_mode 
+                automatic int addr_offset = NrBanks * NrLanes;
+                // automatic logic [3:0] addr_offset_log2 = $clog2(addr_offset);
+                // TODO: needs to be checked when LMUL > 1
+                requester_metadata_d.addr = requester_metadata_q.addr + vaddr(1, NrLanes, VLEN);
+                num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) + $clog2(NrBanks) ) );
 
-              // We read less than 64 bits worth of elements
-              num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) ) );
+                // `ifdef DEBUG
+                // $display("[OP REQ] lut_mode=%h, addr=%d, num_elements=%d, len=%d", requester_metadata_q.lut_mode, requester_metadata_q.addr, num_elements, requester_metadata_q.len);
+                // `endif
+              end else begin
+                // Bump the address pointer
+                requester_metadata_d.addr = requester_metadata_q.addr + 1'b1;
+                // We read less than 64 bits worth of elements
+                num_elements = ( 1 << ( unsigned'(EW64) - unsigned'(requester_metadata_q.vew) ) );
+              end
+
               if (requester_metadata_q.len < num_elements) begin
                 requester_metadata_d.len    = 0;
               end
@@ -423,6 +487,10 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
                 requester_metadata_d.len = requester_metadata_q.len - num_elements;
               end
             end : op_req_grant
+
+            // `ifdef DEBUG
+            // $display("[OP REQ] d.len=%d", requester_metadata_d.len);
+            // `endif
 
             // Finished requesting all the elements
             if (requester_metadata_d.len == '0) begin
@@ -463,6 +531,13 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       endcase
       // Always keep the hazard bits up to date with the global hazard table
       requester_metadata_d.hazard &= global_hazard_table_i[requester_metadata_d.id];
+
+      // `ifdef DEBUG
+      //   if(stall) begin
+      //     $display("[OP REQ] stall=%h, requester_metadata_q.hazard=%h, vinsn_result_written_q=%h, {NrVInsn{requester_metadata_q.is_widening}}=%h, requester_metadata_q.waw_hazard_counter=%h", stall, requester_metadata_q.hazard, vinsn_result_written_q, {NrVInsn{requester_metadata_q.is_widening}}, requester_metadata_q.waw_hazard_counter);
+      //     $display("requester_metadata_d.id=%d, global_hazard_table_i[requester_metadata_d.id]=%h, requester_metadata_d.hazard=%b", requester_metadata_d.id, global_hazard_table_i[requester_metadata_d.id], requester_metadata_d.hazard);
+      //   end
+      // `endif
 
       // Kill all store-unit, idx, and mem-masked requests in case of exceptions
       if (lsu_ex_flush_o && (requester_index == StA || requester_index == SlideAddrGenA || requester_index == MaskM)) begin : vlsu_exception_idle
@@ -545,17 +620,13 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       default: '0
     };
 
+
     // Store their request value
-    ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] =
-    alu_result_req_i;
-    ext_operand_req[mfpu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_MFpu] =
-    mfpu_result_req_i;
-    ext_operand_req[masku_result_addr[idx_width(NrBanks)-1:0]][VFU_MaskUnit] =
-    masku_result_req;
-    ext_operand_req[sldu_result_addr[idx_width(NrBanks)-1:0]][VFU_SlideUnit] =
-    sldu_result_req;
-    ext_operand_req[ldu_result_addr[idx_width(NrBanks)-1:0]][VFU_LoadUnit] =
-    ldu_result_req;
+    ext_operand_req[alu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_Alu] = alu_result_req_i;
+    ext_operand_req[mfpu_result_addr_i[idx_width(NrBanks)-1:0]][VFU_MFpu] = mfpu_result_req_i;
+    ext_operand_req[masku_result_addr[idx_width(NrBanks)-1:0]][VFU_MaskUnit] = masku_result_req;
+    ext_operand_req[sldu_result_addr[idx_width(NrBanks)-1:0]][VFU_SlideUnit] = sldu_result_req;
+    ext_operand_req[ldu_result_addr[idx_width(NrBanks)-1:0]][VFU_LoadUnit] = ldu_result_req;
 
     // Generate the grant signals
     alu_result_gnt_o  = 1'b0;
@@ -579,7 +650,7 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
     logic payload_hp_req;
     logic payload_hp_gnt;
     rr_arb_tree #(
-      .NumIn    (unsigned'(MulFPUC) - unsigned'(AluA) + 1 + unsigned'(VFU_MFpu) - unsigned'(VFU_Alu) + 1),
+      .NumIn    (unsigned'(MulFPUC) - unsigned'(AluA) + 1 + unsigned'(VFU_MFpu) - unsigned'(VFU_Alu) + 1 + 2),
       .DataWidth($bits(payload_t)                                                   ),
       .AxiVldRdy(1'b0                                                               )
     ) i_hp_vrf_arbiter (
@@ -588,11 +659,14 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .flush_i(1'b0  ),
       .rr_i   ('0    ),
       .data_i ({operand_payload[MulFPUC:AluA],
-          operand_payload[NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu]} ),
+          operand_payload[NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu], 
+          operand_payload[PermVal:PermIdx] } ),
       .req_i ({lane_operand_req[bank][MulFPUC:AluA],
-          ext_operand_req[bank][VFU_MFpu:VFU_Alu]}),
+          ext_operand_req[bank][VFU_MFpu:VFU_Alu],
+          lane_operand_req[bank][PermVal:PermIdx]}),
       .gnt_o ({operand_gnt[bank][MulFPUC:AluA],
-          operand_gnt[bank][NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu]}),
+          operand_gnt[bank][NrOperandQueues + VFU_MFpu:NrOperandQueues + VFU_Alu],
+          operand_gnt[bank][PermVal:PermIdx]}),
       .data_o (payload_hp    ),
       .idx_o  (/* Unused */  ),
       .req_o  (payload_hp_req),
@@ -638,12 +712,21 @@ module operand_requester import ara_pkg::*; import rvv_pkg::*; #(
       .data_i ({payload_lp, payload_hp}         ),
       .req_i  ({payload_lp_req, payload_hp_req} ),
       .gnt_o  ({payload_lp_gnt, payload_hp_gnt} ),
-      .data_o ({vrf_addr_o[bank], vrf_wen_o[bank], vrf_wdata_o[bank], vrf_be_o[bank],
-          vrf_tgt_opqueue_o[bank]}),
+      .data_o ({vrf_addr_o[bank], vrf_wen_o[bank], vrf_wdata_o[bank], vrf_be_o[bank], vrf_tgt_opqueue_o[bank]}),
       .idx_o (/* Unused */    ),
       .req_o (vrf_req_o[bank] ),
-      .gnt_i (vrf_req_o[bank] ) // Acknowledge it directly
+      .gnt_i (vrf_gnt_i[bank] ) // Acknowledge from the lower arbiter
     );
+  
+
+  `ifdef DEBUG
+    always_ff @(posedge clk_i) begin
+      if (vrf_req_o[bank]) begin
+        $display("[GENERIC OP REQ] bank=%d, vrf_addr_o=%h, wen=%h, tgt_opqueue_o=%h", bank, vrf_addr_o[bank], vrf_wen_o[bank], vrf_tgt_opqueue_o[bank]);
+      end
+    end
+  `endif
+
   end : gen_vrf_arbiters
 
 endmodule : operand_requester

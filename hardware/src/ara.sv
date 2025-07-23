@@ -6,7 +6,7 @@
 // Description:
 // Ara's top-level, interfacing with Ariane.
 
-module ara import ara_pkg::*; #(
+module ara import ara_pkg::*; import rvv_pkg::*; #(
     // RVV Parameters
     parameter  int           unsigned NrLanes      = 0,                          // Number of parallel vector lanes.
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
@@ -42,7 +42,7 @@ module ara import ara_pkg::*; #(
     // Dependant parameters. DO NOT CHANGE!
     // Ara has NrLanes + 3 processing elements: each one of the lanes, the vector load unit, the
     // vector store unit, the slide unit, and the mask unit.
-    localparam int           unsigned NrPEs        = NrLanes + 4,
+    localparam int           unsigned NrPEs        = NrLanes + 4 + 1, // +1 for the parallel permutation unit
     localparam type                   vlen_t       = logic[$clog2(VLEN+1)-1:0],
     localparam int           unsigned VLENB        = VLEN / 8
   ) (
@@ -157,6 +157,10 @@ module ara import ara_pkg::*; #(
 
     // Request token, for registration in the sequencer
     logic token;
+
+    // Config bits for lookup table (LUT) mode
+    rvv_pkg::vlut_e lut_mode;
+    rvv_pkg::vlut_pack_e lut_pack;
   } ara_req_t;
 
   typedef struct packed {
@@ -256,6 +260,8 @@ module ara import ara_pkg::*; #(
   logic              [NrLanes-1:0] mfpu_vinsn_done;
   // Interface with the operand requesters
   logic [NrVInsn-1:0][NrVInsn-1:0] global_hazard_table;
+  // Indicate if the parallel permutation unit is active
+  logic              [NrVInsn-1:0] permu_active_table;
   // Ready for lane 0 (scalar operand fwd)
   logic pe_scalar_resp_ready;
 
@@ -300,6 +306,8 @@ module ara import ara_pkg::*; #(
     .mfpu_vinsn_done_i     (mfpu_vinsn_done[0]       ),
     // Interface with the operand requesters
     .global_hazard_table_o (global_hazard_table      ),
+    // Interface with the parallel permutation unit
+    .permu_active_table_o  (permu_active_table      ),
     // Interface with the lane 0
     .pe_scalar_resp_i      (pe_req.op inside{[VCPOP:VFIRST]} ? result_scalar : masku_operand[0][1]), // MaskB OpQueue
     .pe_scalar_resp_valid_i(pe_req.op inside{[VCPOP:VFIRST]} ? result_scalar_valid : masku_operand_valid[0][1]), // MaskB OpQueue Valid
@@ -311,6 +319,14 @@ module ara import ara_pkg::*; #(
     .addrgen_fof_exception_i(addrgen_fof_exception),
     .lsu_current_burst_exception_i(lsu_current_burst_exception)
   );
+
+  `ifdef DEBUG
+    always_ff @(posedge clk_i) begin
+      if(pe_req_valid && pe_req_ready) begin
+        $display("[ARA] pe_req: op=%h, id=%d, vfu=%h, scale_vl=%d, vl=%d, vs1=%d, vs2=%d, vd=%d, lut_mode=%h", pe_req.op, pe_req.id, pe_req.vfu, pe_req.scale_vl, pe_req.vl, pe_req.vs1, pe_req.vs2, pe_req.vd, pe_req.lut_mode);
+      end
+    end
+  `endif
 
   // Scalar move support
   always_comb begin
@@ -365,6 +381,19 @@ module ara import ara_pkg::*; #(
   logic      [NrLanes-1:0]                     masku_vrgat_req_valid;
   logic      [NrLanes-1:0]                     masku_vrgat_req_ready;
   vrgat_req_t                                  masku_vrgat_req;
+  // Parallel LUT
+  elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_operand_lane_o;
+  logic  [NrLanes-1:0]                         permu_sel_idx_val_lane_o;
+  logic  [NrLanes-1:0]                         permu_operand_valid_lane_o;
+  logic  [NrLanes-1:0]                         permu_operand_ready_lane_i;
+  // logic  [1:0][NrLanes-1:0]                    permu_operand_ready_lane_i;
+
+  logic     [NrLanes-1:0]                      permu_result_req;
+  vid_t     [NrLanes-1:0]                      permu_result_id;
+  vaddr_t   [NrLanes-1:0]                      permu_result_addr;
+  elen_t [NrLanes-1:0][NrVRFBanksPerLane-1:0]  permu_result_wdata;
+  logic     [NrLanes-1:0]                      permu_result_gnt;
+
 
   for (genvar lane = 0; lane < NrLanes; lane++) begin: gen_lanes
     lane #(
@@ -400,6 +429,8 @@ module ara import ara_pkg::*; #(
       .alu_vinsn_done_o                (alu_vinsn_done[lane]                ),
       .mfpu_vinsn_done_o               (mfpu_vinsn_done[lane]               ),
       .global_hazard_table_i           (global_hazard_table                 ),
+      // Interface with the parallel permutation unit
+      .permu_active_table_i            (permu_active_table                  ),
       // Interface with the slide unit
       .sldu_result_req_i               (sldu_result_req[lane]               ),
       .sldu_result_addr_i              (sldu_result_addr[lane]              ),
@@ -444,9 +475,62 @@ module ara import ara_pkg::*; #(
       .masku_vrgat_req_i               (masku_vrgat_req                     ),
       .mask_i                          (mask[lane]                          ),
       .mask_valid_i                    (mask_valid[lane] & mask_valid_lane  ),
-      .mask_ready_o                    (lane_mask_ready[lane]               )
+      .mask_ready_o                    (lane_mask_ready[lane]               ),
+      // Interface with the parallel permutation network in mask unit
+      .permu_operand_o                 (permu_operand_lane_o[lane]          ),
+      .permu_sel_idx_val_o             (permu_sel_idx_val_lane_o[lane]      ),
+      .permu_operand_valid_o           (permu_operand_valid_lane_o[lane]    ),
+      .permu_operand_ready_i           (permu_operand_ready_lane_i[lane]    ),
+
+      .permu_result_req_i              (permu_result_req[lane]              ),
+      .permu_result_id_i               (permu_result_id[lane]               ),
+      .permu_result_addr_i             (permu_result_addr[lane]             ),
+      .permu_result_wdata_i            (permu_result_wdata[lane]            ),
+      .permu_result_gnt_o              (permu_result_gnt[lane]              )
     );
   end: gen_lanes
+
+  ///////////////////////////////
+  //  SIMD Permutation Network //
+  ///////////////////////////////
+
+  logic  permu_operand_valid_i;
+  logic  permu_operand_ready_o;
+
+  permu #(
+    .NumLanes(NrLanes),
+    .NumBanksPerLane(NrVRFBanksPerLane),
+    .NumSegments(NrVRFBanksPerLane),
+    .NumRotationRadix(4),
+    .SizeXbar(32),
+    .VLEN(VLEN),
+    .vaddr_t(vaddr_t),
+    .pe_req_t(pe_req_t),
+    .pe_resp_t(pe_resp_t)
+  ) i_simd_perm (
+    // Declare some signals so we can see how I/O works
+    .clk_i                    (clk_i                            ),
+    .rst_ni                   (rst_ni                           ),
+    .operand_i                (permu_operand_lane_o             ),
+    .sel_idx_val_i            (|permu_sel_idx_val_lane_o        ),
+    .operand_valid_i          (permu_operand_valid_i            ),
+    .operand_ready_o          (permu_operand_ready_o            ),
+    // Interface with the main sequencer
+    .pe_req_i                 (pe_req                           ),
+    .pe_req_valid_i           (pe_req_valid                     ),
+    .pe_vinsn_running_i       (pe_vinsn_running                 ),
+    .pe_req_ready_o           (pe_req_ready[NrLanes+OffsetPerm] ),
+    .pe_resp_o                (pe_resp[NrLanes+OffsetPerm]      ),
+    // Interface with the lanes
+    .permu_result_req_o       (permu_result_req                 ),
+    .permu_result_id_o        (permu_result_id                  ),
+    .permu_result_addr_o      (permu_result_addr                ),
+    .permu_result_wdata_o     (permu_result_wdata               ),
+    .permu_result_gnt_i       (permu_result_gnt                 )
+  );
+
+  assign permu_operand_valid_i = |permu_operand_valid_lane_o;
+  assign permu_operand_ready_lane_i = {NrLanes{permu_operand_ready_o}};
 
 
   //////////////////////////////
@@ -656,6 +740,7 @@ module ara import ara_pkg::*; #(
     .vstu_mask_ready_i       (vstu_mask_ready                 ),
     .sldu_mask_ready_i       (sldu_mask_ready                 )
   );
+
 
   //////////////////
   //  Assertions  //

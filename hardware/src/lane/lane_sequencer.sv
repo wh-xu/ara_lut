@@ -313,6 +313,10 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             operand_request_valid_o[MaskB] ||
             operand_request_valid_o[MaskM]);
         end
+        VFU_PermUnit : begin
+          // TODO: add lut ready signal
+          pe_req_ready = !(operand_request_valid_o[PermIdx] || operand_request_valid_o[PermVal]);
+        end
         VFU_None : begin
           // VRGATHER/VCOMPRESS use the MaskB opqueue with non-traditional request scheme
           pe_req_ready = !(operand_request_valid_o[MaskB]) && ((vrgat_state_q == IDLE) && !masku_vrgat_req_valid_q);
@@ -323,6 +327,12 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
 
     // We received a new vector instruction
     if (pe_req_valid && pe_req_ready && !vinsn_running_d[pe_req.id]) begin
+      // `ifdef DEBUG
+      // if(lane_id_i == 0) begin
+      //   $display("[LANE SEQUENCER-%d] pe_req: op=%h, vfu=%h, lut_mode=%h", lane_id_i, pe_req.op, pe_req.vfu, pe_req.lut_mode);
+      // end
+      // `endif
+
       // Populate the VFU request
       vfu_operation_d = '{
         id             : pe_req.id,
@@ -331,7 +341,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         vfu            : pe_req.vfu,
         use_vs1        : pe_req.use_vs1,
         // vrgather/vcompress request vs2 in a non-conventional way from MaskB, not ALU
-        use_vs2        : pe_req.use_vs2 && !(pe_req.op inside {[VRGATHER:VCOMPRESS]}),
+        // vs2 needs to be used when activating parallel permutation
+        use_vs2        : pe_req.vfu == VFU_PermUnit ? pe_req.use_vs2 : (pe_req.use_vs2 && !(pe_req.op inside {[VRGATHER:VCOMPRESS]})),
         use_vd_op      : pe_req.use_vd_op,
         scalar_op      : pe_req.scalar_op,
         use_scalar_op  : pe_req.use_scalar_op,
@@ -342,10 +353,11 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
         wide_fp_imm    : pe_req.wide_fp_imm,
         cvt_resize     : pe_req.cvt_resize,
         vtype          : pe_req.vtype,
+        // TODO: add lut_mode?
         default        : '0
       };
       vfu_operation_d.vtype.vsew = pe_req.op inside {[VMFEQ:VMSGT]} ? pe_req.eew_vs2 : pe_req.vtype.vsew;
-      vfu_operation_valid_d = (vfu_operation_d.vfu != VFU_None) ? 1'b1 : 1'b0;
+      vfu_operation_valid_d = (vfu_operation_d.vfu inside {VFU_None, VFU_PermUnit}) ? 1'b0 : 1'b1; // Bypass VFU_None and VFU_PermUnit
 
       // Vector length calculation
       vfu_operation_d.vl = pe_req.vl / NrLanes;
@@ -823,6 +835,7 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
             cvt_resize: CVT_SAME,
             default : '0
           };
+
           // This is an operation that runs normally on the VMFPU, and then gets *condensed* and
           // reshuffled at the Mask Unit.
           // Request a balanced load from every lane despite it being active or not.
@@ -913,6 +926,61 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
           if ((operand_request[MaskM].vl * NrLanes * ELEN) != pe_req.vl)
             operand_request[MaskM].vl += 1;
           operand_request_push[MaskM] = !pe_req.vm;
+        end
+        VFU_PermUnit: begin
+          // TODO: check with this
+          operand_request[PermIdx] = '{
+            id      : pe_req.id,
+            vs      : pe_req.vs1,
+            eew     : pe_req.eew_vs2,
+            scale_vl: pe_req.scale_vl,
+            vl      : pe_req.vl / NrLanes,
+            vtype   : pe_req.vtype,
+            vstart  : vfu_operation_d.vstart,
+            hazard  : pe_req.hazard_vs1 | pe_req.hazard_vd,
+            target_fu : ALU_SLDU,
+            conv      : OpQueueConversionNone,
+            cvt_resize: CVT_SAME,
+            lut_mode  : pe_req.lut_mode,
+            default : '0
+          };
+
+          // Integer comparisons run on the ALU and then get reshuffled and masked in the MASKU
+          if (pe_req.op ==VRGATHEREI16) begin
+            // These source regs contain non-mask vectors.
+            operand_request[PermIdx].eew = pe_req.op == VRGATHEREI16 ? EW16 : pe_req.eew_vs2;
+            operand_request[PermIdx].vl  = pe_req.vl / NrLanes;
+            if ((operand_request[PermIdx].vl * NrLanes) != pe_req.vl)
+              operand_request[PermIdx].vl += 1;
+          end
+          operand_request_push[PermIdx] = pe_req.use_vs1;
+
+          operand_request[PermVal] = '{
+            id      : pe_req.id,
+            vs      : pe_req.vs2,
+            eew     : pe_req.eew_vs2,
+            scale_vl: pe_req.scale_vl,
+            vl      : pe_req.vl / NrLanes,
+            vtype   : pe_req.vtype, 
+            vstart  : vfu_operation_d.vstart,
+            hazard  : pe_req.hazard_vs2 | pe_req.hazard_vd,
+            target_fu : ALU_SLDU,
+            conv      : OpQueueConversionNone,
+            cvt_resize: CVT_SAME,
+            lut_mode  : pe_req.lut_mode,
+            default : '0  
+          };
+
+          // Integer comparisons run on the ALU and then get reshuffled and masked in the MASKU
+          if (pe_req.op ==VRGATHEREI16) begin
+            // These source regs contain non-mask vectors.
+            operand_request[PermVal].eew = pe_req.op == VRGATHEREI16 ? EW16 : pe_req.eew_vs2;
+            operand_request[PermVal].vl  = pe_req.vl / NrLanes;
+            if ((operand_request[PermVal].vl * NrLanes) != pe_req.vl)
+              operand_request[PermVal].vl += 1;
+          end
+          operand_request_push[PermVal] = pe_req.use_vs2;
+
         end
         VFU_None: begin
           operand_request[MaskB] = '{

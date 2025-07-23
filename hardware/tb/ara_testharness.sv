@@ -7,6 +7,8 @@
 //              This is loosely based on CVA6's test harness.
 //              Instantiates an AXI-Bus and memories.
 
+`define STRINGIFY(x) `"x`"
+
 module ara_testharness #(
     // Ara-specific parameters
     parameter int unsigned NrLanes      = 0,
@@ -281,4 +283,79 @@ module ara_testharness #(
 
 
 `endif
+
+// Dump VCD with a SW trigger
+`ifdef VCD_DUMP
+
+  /****************
+  *  VCD DUMPING  *
+  ****************/
+
+`ifdef VCD_PATH
+  string vcd_path = `STRINGIFY(`VCD_PATH);
+`else
+  string vcd_path = "./last_sim.vcd";
+`endif
+
+  localparam logic [63:0] VCD_TRIGGER_ON  = 64'h0000_0000_0000_0001;
+  localparam logic [63:0] VCD_TRIGGER_OFF = 64'hFFFF_FFFF_FFFF_FFFF;
+
+  event start_dump_event;
+  event stop_dump_event;
+
+  logic [63:0] event_trigger_reg;
+  logic        dumping = 1'b0;
+
+  assign event_trigger_reg = i_ara_soc.i_ctrl_registers.event_trigger_o;
+
+  initial begin
+    $display("VCD_DUMP successfully defined\n");
+  end
+
+  always_ff @(posedge clk_i) begin
+    if(event_trigger_reg == VCD_TRIGGER_ON && !dumping) begin
+       $display("[TB - VCD] START DUMPING\n");
+       -> start_dump_event;
+       dumping = 1'b1;
+    end
+    if(event_trigger_reg == VCD_TRIGGER_OFF) begin
+       -> stop_dump_event;
+       $display("[TB - VCD] STOP DUMPING\n");
+    end
+  end
+
+  logic [1:0] cnt_exit_o  = '0;
+  
+  initial begin
+    // @(start_dump_event);
+    $dumpfile(vcd_path);
+    $dumpvars(0, i_ara_soc.i_system.i_ara);
+    $display("[TB - VCD] START DUMPING to %s\n", vcd_path);
+    $dumpon;
+
+    // #1 $display("[TB - VCD] DUMPING...\n");
+
+    // @(stop_dump_event)
+    // $dumpoff;
+    // $dumpflush;
+    // $finish;
+  end
+
+  always @(exit_o) begin
+    if (exit_o == 0) begin
+      cnt_exit_o = cnt_exit_o + 1;
+      // $display("[TB] exit_o changed to: %0d", exit_o);
+      // $display("[TB] cnt_exit_o changed to: %0d", cnt_exit_o);
+
+      if (cnt_exit_o == 2) begin
+        $display("[TB - VCD] Dump off and finish");
+        $dumpoff;
+        $dumpflush;
+        // $finish;
+      end
+    end
+  end
+
+`endif
+
 endmodule : ara_testharness

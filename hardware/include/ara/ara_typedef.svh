@@ -80,6 +80,10 @@ typedef struct packed {
   logic [NrVInsn-1:0] hazard_vs2;
   logic [NrVInsn-1:0] hazard_vm;
   logic [NrVInsn-1:0] hazard_vd;
+
+  // Lookup table configs
+  rvv_pkg::vlut_e lut_mode;
+  rvv_pkg::vlut_pack_e lut_pack;
 } pe_req_t;
 
 typedef struct packed {

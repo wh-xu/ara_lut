@@ -26,7 +26,11 @@ module vector_regfile import ara_pkg::*; #(
     input  strb_t    [NrBanks-1:0]         be_i,
     // Operands
     output elen_t    [NrOperandQueues-1:0] operand_o,
-    output logic     [NrOperandQueues-1:0] operand_valid_o
+    output logic     [NrOperandQueues-1:0] operand_valid_o,
+    // Operands for parallel LUT
+    output elen_t    [NrBanks-1:0]         operand_permu_o,
+    output logic                           operand_permu_valid_o,
+    output opqueue_e                       operand_permu_opqueue_o
   );
 
 `include "common_cells/registers.svh"
@@ -44,6 +48,11 @@ module vector_regfile import ara_pkg::*; #(
   elen_t    [NrBanks-1:0] rdata;
   logic     [NrBanks-1:0] rdata_valid_q;
   opqueue_e [NrBanks-1:0] tgt_opqueue_q;
+
+  elen_t    [NrBanks-1:0] rdata_lut;
+  logic     [NrBanks-1:0] rdata_valid_lut_q;
+  elen_t    [NrBanks-1:0] rdata_xbar;
+  logic     [NrBanks-1:0] rdata_valid_xbar_q;
 
   // Generate the rdata_valid and tgt_opqueue signals by delaying the request by one cycle
   always_ff @(posedge clk_i or negedge rst_ni) begin: p_rdata_valid
@@ -109,8 +118,8 @@ module vector_regfile import ara_pkg::*; #(
     .rst_ni (rst_ni         ),
     .flush_i(1'b0           ),
     .rr_i   ('0             ),
-    .data_i (rdata          ),
-    .valid_i(rdata_valid_q  ),
+    .data_i (rdata     ),
+    .valid_i(rdata_valid_xbar_q  ),
     .ready_o(/* Unused */   ),
     .sel_i  (tgt_opqueue_q  ),
     .data_o (operand_o      ),
@@ -118,5 +127,14 @@ module vector_regfile import ara_pkg::*; #(
     .idx_o  (/* Unused */   ),
     .ready_i('1             ) // Always ready
   );
+
+  // for(genvar i=0; i<NrBanks; i++) begin: gen_rdata_xbar
+  //   assign rdata_valid_xbar_q[i] = tgt_opqueue_q[i] inside {PermIdx, PermVal} ? '0 : rdata_valid_q[i];
+  //   assign operand_permu_o[i] = tgt_opqueue_q[i] inside {PermIdx, PermVal} ? rdata[i] : '0;
+  // end
+  assign rdata_valid_xbar_q = tgt_opqueue_q[0] inside {PermIdx, PermVal} ? '0 : rdata_valid_q;
+  assign operand_permu_o = rdata;
+  assign operand_permu_valid_o = tgt_opqueue_q[0] inside {PermIdx, PermVal} ? &rdata_valid_q : '0;
+  assign operand_permu_opqueue_o = tgt_opqueue_q[0];
 
 endmodule : vector_regfile
